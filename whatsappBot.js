@@ -34,24 +34,32 @@ const client = new Client({
 
 // 1. Generar el QR
 client.on('qr', async (qr) => {
-    // Escribe aquí TU número de teléfono al que quieres conectar el bot
-    // Formato: CodigoPais + CodigoArea + Numero (Sin + ni espacios)
-    const miNumero = '5492622563203'; // <--- ¡CAMBIA ESTO!
+    // Tu número (Asegúrate que esté bien)
+    const miNumero = '5492622563203'; 
 
-    console.log('⚠️ QR Recibido. Generando código de vinculación para:', miNumero);
+    console.log('⚠️ QR detectado. Esperando 5 segundos para estabilizar...');
+    
+    // 1. ESPERAR 5 SEGUNDOS (Truco para que no falle)
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    console.log(`⏳ Pidiendo código para: ${miNumero}...`);
 
     try {
-        // Generamos el código (ej: K2J-4L1)
+        // 2. Pedir el código
         const code = await client.requestPairingCode(miNumero);
+        
         console.log('------------------------------------------------');
         console.log('🔒 TU CÓDIGO DE VINCULACIÓN:', code);
         console.log('------------------------------------------------');
         console.log('1. Ve a WhatsApp en tu celular > Dispositivos vinculados');
         console.log('2. Toca en "Vincular un dispositivo"');
-        console.log('3. Toca abajo donde dice "Vincular con el número de teléfono"');
+        console.log('3. Toca "Vincular con el número de teléfono"');
         console.log('4. Escribe el código de arriba.');
+
     } catch (err) {
-        console.error('Error pidiendo código:', err.message);
+        // 3. Mostrar error detallado
+        console.error('❌ Error pidiendo código:', err);
+        if (err.message) console.error('Mensaje:', err.message);
     }
 });
 
