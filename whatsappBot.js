@@ -36,7 +36,7 @@ const client = new Client({
 client.on('qr', async (qr) => {
     // Escribe aquí TU número de teléfono al que quieres conectar el bot
     // Formato: CodigoPais + CodigoArea + Numero (Sin + ni espacios)
-    const miNumero = '549xxxxxxxxxx'; // <--- ¡CAMBIA ESTO!
+    const miNumero = '5492622563203'; // <--- ¡CAMBIA ESTO!
 
     console.log('⚠️ QR Recibido. Generando código de vinculación para:', miNumero);
 
