@@ -33,34 +33,18 @@ const client = new Client({
 });
 
 // 1. Generar el QR
-client.on('qr', async (qr) => {
-    // Tu número (Asegúrate que esté bien)
-    const miNumero = '5492622563203'; 
-
-    console.log('⚠️ QR detectado. Esperando 5 segundos para estabilizar...');
+client.on('qr', (qr) => {
+    console.log('⚠️ QR RECIBIDO');
     
-    // 1. ESPERAR 5 SEGUNDOS (Truco para que no falle)
-    await new Promise(resolve => setTimeout(resolve, 5000));
-
-    console.log(`⏳ Pidiendo código para: ${miNumero}...`);
-
-    try {
-        // 2. Pedir el código
-        const code = await client.requestPairingCode(miNumero);
-        
-        console.log('------------------------------------------------');
-        console.log('🔒 TU CÓDIGO DE VINCULACIÓN:', code);
-        console.log('------------------------------------------------');
-        console.log('1. Ve a WhatsApp en tu celular > Dispositivos vinculados');
-        console.log('2. Toca en "Vincular un dispositivo"');
-        console.log('3. Toca "Vincular con el número de teléfono"');
-        console.log('4. Escribe el código de arriba.');
-
-    } catch (err) {
-        // 3. Mostrar error detallado
-        console.error('❌ Error pidiendo código:', err);
-        if (err.message) console.error('Mensaje:', err.message);
-    }
+    // Convertimos los datos del QR en una URL de imagen
+    // Usamos la API de qrserver.com (es gratis y segura para esto)
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`;
+    
+    console.log('------------------------------------------------');
+    console.log('👇 HAZ CLIC EN ESTE ENLACE PARA VER EL CÓDIGO QR 👇');
+    console.log(qrUrl);
+    console.log('------------------------------------------------');
+    console.log('Escanea la imagen que aparece en el enlace con tu WhatsApp.');
 });
 
 // 2. Confirmación de conexión
