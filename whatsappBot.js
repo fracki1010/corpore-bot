@@ -19,7 +19,7 @@ const { getChatResponse } = require('./src/services/groqService');
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
-        // executablePath: '/usr/bin/google-chrome-stable', // Ruta de Chrome en Docker
+        executablePath: '/usr/bin/google-chrome-stable', // Ruta de Chrome en Docker
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',

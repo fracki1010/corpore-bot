@@ -1,7 +1,6 @@
-# Usamos una imagen de Node ligera
-FROM node:18-slim
+FROM node:18
 
-# 1. Instalar librerías necesarias para correr Chrome (Puppeteer)
+# 1. Instalar Chrome y sus dependencias del sistema
 RUN apt-get update \
     && apt-get install -y wget gnupg \
     && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
@@ -11,18 +10,19 @@ RUN apt-get update \
       --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Crear directorio de trabajo
+# 2. Configurar directorio
 WORKDIR /usr/src/app
 
-# 3. Copiar archivos de dependencias
+# 3. Copiar y preparar dependencias
 COPY package*.json ./
+# Forzamos la instalación de puppeteer compatible
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 
-# 4. Instalar dependencias del proyecto
-# El flag --production evita instalar cosas innecesarias
 RUN npm install --production
 
-# 5. Copiar el resto del código (incluyendo business_info.txt)
+# 4. Copiar el resto del código
 COPY . .
 
-# 6. Comando para iniciar el bot
+# 5. Ejecutar
 CMD ["node", "whatsappBot.js"]
