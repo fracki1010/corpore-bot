@@ -94,5 +94,51 @@ client.on('message', async (message) => {
     }
 });
 
+
+// --- MODO ADMINISTRADOR: DIFUSIÓN ---
+    
+    const NUMERO_ADMIN = '5492622517447@c.us'; 
+
+    if (message.from === NUMERO_ADMIN && message.body.startsWith('!difusion ')) {
+        // 1. Obtenemos el mensaje a enviar (quitando la palabra !difusion)
+        const mensajeParaEnviar = message.body.slice(10);
+        
+        // 2. Cargamos la lista de clientes
+        const fs = require('fs');
+        let clientes = [];
+        try {
+            const rawData = fs.readFileSync('clientes.json');
+            clientes = JSON.parse(rawData);
+        } catch (e) {
+            await message.reply('❌ Error: No pude leer el archivo clientes.json');
+            return;
+        }
+
+        await message.reply(`📢 Iniciando difusión a ${clientes.length} contactos. Esto tomará un tiempo para evitar bloqueos...`);
+
+        // 3. Bucle de envío con RETRASO (Anti-Ban)
+        for (const cliente of clientes) {
+            const numeroDestino = cliente.numero + '@c.us';
+            
+            try {
+                // Enviar mensaje
+                await client.sendMessage(numeroDestino, mensajeParaEnviar);
+                console.log(`✅ Enviado a ${cliente.nombre}`);
+                
+                // 4. ESPERA ALEATORIA (Entre 10 y 25 segundos)
+                // Esto es vital para que WhatsApp no detecte que eres un robot
+                const espera = Math.floor(Math.random() * 15000) + 10000; 
+                await new Promise(resolve => setTimeout(resolve, espera));
+
+            } catch (error) {
+                console.error(`❌ Falló envío a ${cliente.nombre}:`, error);
+            }
+        }
+
+        await message.reply('✅ ¡Difusión terminada con éxito!');
+        return; // Detenemos aquí para que la IA no responda también
+    }
+
+
 // Iniciar el cliente
 client.initialize();
