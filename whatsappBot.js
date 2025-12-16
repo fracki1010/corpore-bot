@@ -45,7 +45,7 @@ client.on('message', async (message) => {
     if (!message.body || message.body.length === 0) return;
 
     // --- MODO ADMINISTRADOR: DIFUSIÓN (ESTO DEBE IR AQUÍ ADENTRO) ---
-    const NUMERO_ADMIN = '5492622517447@c.us'; 
+    const NUMERO_ADMIN = '140278446997512@lid'; 
 
     if (message.from === NUMERO_ADMIN && message.body.startsWith('!difusion ')) {
         // 1. Obtenemos el mensaje a enviar
