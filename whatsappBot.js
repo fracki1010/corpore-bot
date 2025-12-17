@@ -1,8 +1,9 @@
 require('dotenv').config();
 const express = require('express');
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const fs = require('fs'); // <--- Movido aquí arriba para que funcione siempre
+const fs = require('fs');
 const { getChatResponse } = require('./src/services/groqService');
+const { transcribirAudio } = require('./src/services/transcriptionService');
 
 // Configuración del cliente
 const client = new Client({
@@ -37,134 +38,148 @@ client.on('ready', () => {
 });
 
 // --- MEMORIA RAM DE CONVERSACIONES ---
-// Guardará los últimos mensajes de cada número
 const historiales = {};
 
 client.on('message', async (message) => {
 
-    // --- FILTROS ---
+    // --- FILTROS BÁSICOS ---
     if (message.from === 'status@broadcast') return;
-    if (!message.body || message.body.length === 0) return;
 
-    // --- MODO DIFUSIÓN (Tu código de admin) ---
-    const NUMERO_ADMIN = '140278446997512@lid'; // <--- ASEGÚRATE QUE ESTE SEA TU ID
+    // --- MODO DIFUSIÓN (ADMIN) ---
+    const NUMERO_ADMIN = '140278446997512@lid'; // Tu ID actual
 
     if (message.from === NUMERO_ADMIN && message.body.startsWith('!difusion ')) {
-        // ... (Copia aquí tu lógica de difusión que ya funcionaba) ...
-        // (Por brevedad no la repito toda, pero mantén tu bloque de difusión aquí)
-        // Si no lo tienes a mano, avísame y te lo paso completo de nuevo.
         const mensajeParaEnviar = message.body.slice(10);
         let clientes = [];
+        
         try {
             const rawData = fs.readFileSync('clientes.json');
             clientes = JSON.parse(rawData);
-        } catch (e) { await message.reply('❌ Error leyendo clientes.json'); return; }
+        } catch (e) { 
+            await message.reply('❌ Error: No encontré o no pude leer clientes.json'); 
+            return; 
+        }
 
-        await message.reply(`📢 Iniciando difusión...`);
+        await message.reply(`📢 Iniciando difusión a ${clientes.length} contactos...`);
+
         for (const cliente of clientes) {
             try {
-                await client.sendMessage(cliente.numero + '@c.us', mensajeParaEnviar);
-                await new Promise(r => setTimeout(r, Math.random() * 5000 + 5000));
-            } catch (e) { console.error('Falló uno'); }
+                // Formateamos el número
+                const numeroDestino = cliente.numero.includes('@c.us') ? cliente.numero : `${cliente.numero}@c.us`;
+                
+                await client.sendMessage(numeroDestino, mensajeParaEnviar);
+                console.log(`✅ Enviado a ${cliente.nombre}`);
+                
+                // Espera aleatoria para evitar BAN (5 a 10 segundos)
+                const espera = Math.floor(Math.random() * 5000) + 5000; 
+                await new Promise(r => setTimeout(r, espera));
+
+            } catch (e) { 
+                console.error(`❌ Falló envío a ${cliente.nombre}`); 
+            }
         }
         await message.reply('✅ Difusión terminada.');
-        return;
+        return; // Detenemos aquí
     }
+
+    // --- PROCESAMIENTO DE AUDIO Y TEXTO ---
+    
+    let mensajeUsuario = message.body; // Por defecto es el texto
+
+    // 🔊 DETECTAR AUDIOS
+    if (message.hasMedia && (message.type === 'audio' || message.type === 'ptt')) {
+        console.log('🎤 Audio detectado. Procesando...');
+        try {
+            const media = await message.downloadMedia();
+            const transcripcion = await transcribirAudio(media);
+            
+            if (transcripcion) {
+                console.log(`🗣️ Transcripción: "${transcripcion}"`);
+                mensajeUsuario = transcripcion; // Reemplazamos el audio por su texto
+            } else {
+                await message.reply('🙉 Escuché el audio pero no entendí lo que dijiste.');
+                return;
+            }
+        } catch (err) {
+            console.error('Error procesando audio:', err);
+            return;
+        }
+    }
+
+    // Si después de intentar transcribir, el mensaje sigue vacío (ej: una foto sin texto), ignoramos
+    if (!mensajeUsuario || mensajeUsuario.length === 0) return;
 
     // --- LÓGICA DE IA CON MEMORIA ---
-
     const chatId = message.from;
-    console.log(`📩 Mensaje de ${chatId}: ${message.body}`);
+    console.log(`📩 Chat con ${chatId}: "${mensajeUsuario}"`);
 
-    // 1. Inicializar historial si es nuevo
-    if (!historiales[chatId]) {
-        historiales[chatId] = [];
-    }
+    // 1. Inicializar historial
+    if (!historiales[chatId]) historiales[chatId] = [];
 
-    // 2. Agregar mensaje del USUARIO al historial
-    historiales[chatId].push({
-        role: "user",
-        content: message.body
-    });
+    // 2. Agregar mensaje del USUARIO
+    historiales[chatId].push({ role: "user", content: mensajeUsuario });
 
-    // 3. Limitar memoria (Solo recordamos los últimos 10 mensajes para no saturar)
+    // 3. Limitar memoria (Últimos 10 mensajes)
     if (historiales[chatId].length > 10) {
         historiales[chatId] = historiales[chatId].slice(-10);
     }
 
     try {
         const chat = await message.getChat();
-        await chat.sendStateTyping();
+        await chat.sendStateTyping(); // Escribiendo...
 
-        // 4. Enviamos EL HISTORIAL COMPLETO a la IA (no solo el mensaje actual)
+        // 4. Consultar a Groq con todo el historial
         const botResponse = await getChatResponse(historiales[chatId]);
 
         // 5. Agregar respuesta del BOT al historial
-        historiales[chatId].push({
-            role: "assistant",
-            content: botResponse
-        });
+        historiales[chatId].push({ role: "assistant", content: botResponse });
 
         await message.reply(botResponse);
         await chat.clearState();
 
     } catch (error) {
-        console.error('Error procesando mensaje:', error);
-        // Si falla, borramos el historial por si acaso se corrompió
-        historiales[chatId] = [];
+        console.error('Error en IA:', error);
+        historiales[chatId] = []; // Reiniciar memoria si falla
     }
 });
 
 
 // ==========================================
-// 🌐 SERVIDOR API (PARA ENVIAR MENSAJES)
+// 🌐 SERVIDOR API (EXPRESS)
 // ==========================================
 const app = express();
-app.use(express.json()); // Permite recibir JSON
+app.use(express.json());
 
-// Endpoint para enviar mensaje
-// Se llama con POST a: /api/send-message
 app.post('/api/send-message', async (req, res) => {
     const { number, message, apiKey } = req.body;
 
-    // 1. Seguridad básica (API KEY)
-    // Cambia '12345' por una clave secreta difícil
     if (apiKey !== 'TU_CLAVE_SECRETA_123') {
-        return res.status(403).json({ error: 'Acceso denegado: API Key incorrecta' });
+        return res.status(403).json({ error: 'API Key incorrecta' });
     }
 
-    // 2. Validaciones
     if (!number || !message) {
-        return res.status(400).json({ error: 'Faltan datos: number o message' });
+        return res.status(400).json({ error: 'Faltan datos' });
     }
 
     if (!client.info) {
-        return res.status(503).json({ error: 'El bot de WhatsApp aún no está listo/conectado' });
+        return res.status(503).json({ error: 'Bot no conectado' });
     }
 
     try {
-        // 3. Formatear número (Agregar @c.us si falta)
-        // Eliminamos el '+' si viene, y quitamos espacios
         const cleanNumber = number.replace(/\+/g, '').replace(/\s/g, '');
         const finalId = cleanNumber.includes('@c.us') ? cleanNumber : `${cleanNumber}@c.us`;
 
-        // 4. Enviar mensaje
         await client.sendMessage(finalId, message);
-
-        console.log(`📤 API: Mensaje enviado a ${cleanNumber}`);
-        return res.json({ success: true, status: 'Mensaje enviado correctamente' });
+        console.log(`📤 API: Enviado a ${cleanNumber}`);
+        return res.json({ success: true });
 
     } catch (error) {
-        console.error('❌ Error en API:', error);
-        return res.status(500).json({ error: 'Error interno enviando mensaje', details: error.message });
+        console.error('❌ Error API:', error);
+        return res.status(500).json({ error: error.message });
     }
 });
 
-// Iniciar servidor web en el puerto que asigne Railway (o 3000)
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`🌐 Servidor API escuchando en el puerto ${PORT}`);
-});
-// ==========================================
+app.listen(PORT, () => console.log(`🌐 API lista en puerto ${PORT}`));
 
 client.initialize();
