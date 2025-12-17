@@ -37,54 +37,93 @@ client.on('ready', () => {
     console.log('✅ ¡El bot de WhatsApp está listo y conectado!');
 });
 
-// --- MEMORIA RAM DE CONVERSACIONES ---
+// --- MEMORIA RAM ---
 const historiales = {};
+const pausados = new Set(); // Lista de números en "Modo Humano"
 
 client.on('message', async (message) => {
 
     // --- FILTROS BÁSICOS ---
     if (message.from === 'status@broadcast') return;
 
-    // --- MODO DIFUSIÓN (ADMIN) ---
-    const NUMERO_ADMIN = '140278446997512@lid'; // Tu ID actual
+    // Tu ID de Admin (LID o C.US)
+    const NUMERO_ADMIN = '140278446997512@lid'; 
 
-    if (message.from === NUMERO_ADMIN && message.body.startsWith('!difusion ')) {
-        const mensajeParaEnviar = message.body.slice(10);
-        let clientes = [];
+    // =============================================
+    // 🛡️ ZONA DE COMANDOS DE ADMINISTRADOR
+    // =============================================
+    if (message.from === NUMERO_ADMIN) {
         
-        try {
-            const rawData = fs.readFileSync('clientes.json');
-            clientes = JSON.parse(rawData);
-        } catch (e) { 
-            await message.reply('❌ Error: No encontré o no pude leer clientes.json'); 
-            return; 
+        // COMANDO: !off NUMERO (Pausar bot para un cliente)
+        if (message.body.startsWith('!off ')) {
+            let targetNumber = message.body.split(' ')[1]; // El número que escribas después de !off
+            if (!targetNumber) return;
+            // Asegurar formato @c.us
+            targetNumber = targetNumber.includes('@c.us') ? targetNumber : `${targetNumber}@c.us`;
+            
+            pausados.add(targetNumber);
+            await message.reply(`🛑 Bot PAUSADO para ${targetNumber}. Ya puedes hablar manualmente.`);
+            return;
         }
 
-        await message.reply(`📢 Iniciando difusión a ${clientes.length} contactos...`);
+        // COMANDO: !on NUMERO (Reactivar bot)
+        if (message.body.startsWith('!on ')) {
+            let targetNumber = message.body.split(' ')[1];
+            if (!targetNumber) return;
+            targetNumber = targetNumber.includes('@c.us') ? targetNumber : `${targetNumber}@c.us`;
+            
+            pausados.delete(targetNumber);
+            // Opcional: Borrar memoria para empezar fresco
+            delete historiales[targetNumber]; 
+            await message.reply(`✅ Bot REACTIVADO para ${targetNumber}.`);
+            return;
+        }
 
-        for (const cliente of clientes) {
+        // COMANDO: !difusion MENSAJE
+        if (message.body.startsWith('!difusion ')) {
+            const mensajeParaEnviar = message.body.slice(10);
+            let clientes = [];
             try {
-                // Formateamos el número
-                const numeroDestino = cliente.numero.includes('@c.us') ? cliente.numero : `${cliente.numero}@c.us`;
-                
-                await client.sendMessage(numeroDestino, mensajeParaEnviar);
-                console.log(`✅ Enviado a ${cliente.nombre}`);
-                
-                // Espera aleatoria para evitar BAN (5 a 10 segundos)
-                const espera = Math.floor(Math.random() * 5000) + 5000; 
-                await new Promise(r => setTimeout(r, espera));
-
+                const rawData = fs.readFileSync('clientes.json');
+                clientes = JSON.parse(rawData);
             } catch (e) { 
-                console.error(`❌ Falló envío a ${cliente.nombre}`); 
+                await message.reply('❌ Error: No encontré o no pude leer clientes.json'); 
+                return; 
             }
+
+            await message.reply(`📢 Iniciando difusión a ${clientes.length} contactos...`);
+
+            for (const cliente of clientes) {
+                try {
+                    const numeroDestino = cliente.numero.includes('@c.us') ? cliente.numero : `${cliente.numero}@c.us`;
+                    await client.sendMessage(numeroDestino, mensajeParaEnviar);
+                    console.log(`✅ Enviado a ${cliente.nombre}`);
+                    // Espera aleatoria (5 a 10 seg)
+                    const espera = Math.floor(Math.random() * 5000) + 5000; 
+                    await new Promise(r => setTimeout(r, espera));
+                } catch (e) { 
+                    console.error(`❌ Falló envío a ${cliente.nombre}`); 
+                }
+            }
+            await message.reply('✅ Difusión terminada.');
+            return;
         }
-        await message.reply('✅ Difusión terminada.');
-        return; // Detenemos aquí
     }
 
-    // --- PROCESAMIENTO DE AUDIO Y TEXTO ---
+    // =============================================
+    // 🚦 CHECK DE PAUSA (MODO HUMANO)
+    // =============================================
+    // Si el número está en la lista de pausados, el bot IGNORA el mensaje y no hace nada.
+    if (pausados.has(message.from)) {
+        console.log(`🙊 Chat pausado para ${message.from}. Esperando a humano...`);
+        return; 
+    }
+
+    // =============================================
+    // 🧠 PROCESAMIENTO DE IA Y AUDIOS
+    // =============================================
     
-    let mensajeUsuario = message.body; // Por defecto es el texto
+    let mensajeUsuario = message.body;
 
     // 🔊 DETECTAR AUDIOS
     if (message.hasMedia && (message.type === 'audio' || message.type === 'ptt')) {
@@ -95,7 +134,7 @@ client.on('message', async (message) => {
             
             if (transcripcion) {
                 console.log(`🗣️ Transcripción: "${transcripcion}"`);
-                mensajeUsuario = transcripcion; // Reemplazamos el audio por su texto
+                mensajeUsuario = transcripcion; 
             } else {
                 await message.reply('🙉 Escuché el audio pero no entendí lo que dijiste.');
                 return;
@@ -106,32 +145,26 @@ client.on('message', async (message) => {
         }
     }
 
-    // Si después de intentar transcribir, el mensaje sigue vacío (ej: una foto sin texto), ignoramos
     if (!mensajeUsuario || mensajeUsuario.length === 0) return;
 
     // --- LÓGICA DE IA CON MEMORIA ---
     const chatId = message.from;
     console.log(`📩 Chat con ${chatId}: "${mensajeUsuario}"`);
 
-    // 1. Inicializar historial
     if (!historiales[chatId]) historiales[chatId] = [];
 
-    // 2. Agregar mensaje del USUARIO
     historiales[chatId].push({ role: "user", content: mensajeUsuario });
 
-    // 3. Limitar memoria (Últimos 10 mensajes)
     if (historiales[chatId].length > 10) {
         historiales[chatId] = historiales[chatId].slice(-10);
     }
 
     try {
         const chat = await message.getChat();
-        await chat.sendStateTyping(); // Escribiendo...
+        await chat.sendStateTyping();
 
-        // 4. Consultar a Groq con todo el historial
         const botResponse = await getChatResponse(historiales[chatId]);
 
-        // 5. Agregar respuesta del BOT al historial
         historiales[chatId].push({ role: "assistant", content: botResponse });
 
         await message.reply(botResponse);
@@ -139,7 +172,7 @@ client.on('message', async (message) => {
 
     } catch (error) {
         console.error('Error en IA:', error);
-        historiales[chatId] = []; // Reiniciar memoria si falla
+        historiales[chatId] = [];
     }
 });
 
@@ -156,11 +189,9 @@ app.post('/api/send-message', async (req, res) => {
     if (apiKey !== 'TU_CLAVE_SECRETA_123') {
         return res.status(403).json({ error: 'API Key incorrecta' });
     }
-
     if (!number || !message) {
         return res.status(400).json({ error: 'Faltan datos' });
     }
-
     if (!client.info) {
         return res.status(503).json({ error: 'Bot no conectado' });
     }
