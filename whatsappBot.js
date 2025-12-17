@@ -22,31 +22,30 @@ const client = new Client({
     }
 });
 
-// 1. Sistema de QR con Link
+// 1. Sistema de QR
 client.on('qr', (qr) => {
     console.log('⚠️ QR RECIBIDO');
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`;
-    console.log('------------------------------------------------');
     console.log('👇 HAZ CLIC EN ESTE ENLACE PARA VER EL CÓDIGO QR 👇');
     console.log(qrUrl);
-    console.log('------------------------------------------------');
 });
 
-// 2. Confirmación de conexión
+// 2. Confirmación
 client.on('ready', () => {
     console.log('✅ ¡El bot de WhatsApp está listo y conectado!');
 });
 
 // --- MEMORIA RAM ---
 const historiales = {};
-const pausados = new Set(); // Lista de números en "Modo Humano"
+// AHORA guardaremos solo los NÚMEROS LIMPIOS (ej: "549261...")
+const pausados = new Set(); 
 
 client.on('message', async (message) => {
 
     // --- FILTROS BÁSICOS ---
     if (message.from === 'status@broadcast') return;
 
-    // Tu ID de Admin (LID o C.US)
+    // Tu ID de Admin (el que sale en el log, aunque sea LID)
     const NUMERO_ADMIN = '140278446997512@lid'; 
 
     // =============================================
@@ -56,54 +55,53 @@ client.on('message', async (message) => {
         
         // COMANDO: !off NUMERO (Pausar bot para un cliente)
         if (message.body.startsWith('!off ')) {
-            let targetNumber = message.body.split(' ')[1]; // El número que escribas después de !off
-            if (!targetNumber) return;
-            // Asegurar formato @c.us
-            targetNumber = targetNumber.includes('@c.us') ? targetNumber : `${targetNumber}@c.us`;
+            // Limpiamos el número: quitamos espacios, +, @c.us, etc. Solo dejamos dígitos.
+            let rawInput = message.body.split(' ')[1] || "";
+            let numeroLimpio = rawInput.replace(/[^0-9]/g, '');
+
+            if (numeroLimpio.length < 5) return; // Validación básica
             
-            pausados.add(targetNumber);
-            await message.reply(`🛑 Bot PAUSADO para ${targetNumber}. Ya puedes hablar manualmente.`);
+            pausados.add(numeroLimpio);
+            await message.reply(`🛑 Bot PAUSADO para el número: ${numeroLimpio}.`);
             return;
         }
 
         // COMANDO: !on NUMERO (Reactivar bot)
         if (message.body.startsWith('!on ')) {
-            let targetNumber = message.body.split(' ')[1];
-            if (!targetNumber) return;
-            targetNumber = targetNumber.includes('@c.us') ? targetNumber : `${targetNumber}@c.us`;
+            let rawInput = message.body.split(' ')[1] || "";
+            let numeroLimpio = rawInput.replace(/[^0-9]/g, '');
+
+            if (numeroLimpio.length < 5) return;
+
+            pausados.delete(numeroLimpio);
             
-            pausados.delete(targetNumber);
-            // Opcional: Borrar memoria para empezar fresco
-            delete historiales[targetNumber]; 
-            await message.reply(`✅ Bot REACTIVADO para ${targetNumber}.`);
+            // Borramos la memoria de ese número (usando lógica aproximada) para reiniciar
+            // (Iteramos para encontrar si había un historial con ese número)
+            Object.keys(historiales).forEach(key => {
+                if(key.includes(numeroLimpio)) delete historiales[key];
+            });
+
+            await message.reply(`✅ Bot REACTIVADO para el número: ${numeroLimpio}.`);
             return;
         }
 
-        // COMANDO: !difusion MENSAJE
+        // COMANDO: !difusion
         if (message.body.startsWith('!difusion ')) {
+            // ... (Tu lógica de difusión, mantenla igual) ...
             const mensajeParaEnviar = message.body.slice(10);
             let clientes = [];
             try {
                 const rawData = fs.readFileSync('clientes.json');
                 clientes = JSON.parse(rawData);
-            } catch (e) { 
-                await message.reply('❌ Error: No encontré o no pude leer clientes.json'); 
-                return; 
-            }
+            } catch (e) { await message.reply('❌ Error leyendo clientes.json'); return; }
 
-            await message.reply(`📢 Iniciando difusión a ${clientes.length} contactos...`);
-
+            await message.reply(`📢 Iniciando difusión...`);
             for (const cliente of clientes) {
                 try {
-                    const numeroDestino = cliente.numero.includes('@c.us') ? cliente.numero : `${cliente.numero}@c.us`;
-                    await client.sendMessage(numeroDestino, mensajeParaEnviar);
-                    console.log(`✅ Enviado a ${cliente.nombre}`);
-                    // Espera aleatoria (5 a 10 seg)
-                    const espera = Math.floor(Math.random() * 5000) + 5000; 
-                    await new Promise(r => setTimeout(r, espera));
-                } catch (e) { 
-                    console.error(`❌ Falló envío a ${cliente.nombre}`); 
-                }
+                    const dest = cliente.numero.includes('@') ? cliente.numero : `${cliente.numero}@c.us`;
+                    await client.sendMessage(dest, mensajeParaEnviar);
+                    await new Promise(r => setTimeout(r, Math.random() * 5000 + 5000));
+                } catch (e) { console.error('Error envío'); }
             }
             await message.reply('✅ Difusión terminada.');
             return;
@@ -111,13 +109,26 @@ client.on('message', async (message) => {
     }
 
     // =============================================
-    // 🚦 CHECK DE PAUSA (MODO HUMANO)
+    // 🚦 CHECK DE PAUSA INTELIGENTE (FIX LIDs)
     // =============================================
-    // Si el número está en la lista de pausados, el bot IGNORA el mensaje y no hace nada.
-    if (pausados.has(message.from)) {
-        console.log(`🙊 Chat pausado para ${message.from}. Esperando a humano...`);
-        return; 
+    // Obtenemos el contacto real para ver su número verdadero, 
+    // sin importar si viene como LID o C.US
+    let numeroRealDelCliente = "";
+    
+    try {
+        const contact = await message.getContact();
+        numeroRealDelCliente = contact.number; // Esto devuelve el número "549..." limpio
+    } catch (err) {
+        // Si falla, intentamos limpiar el ID manualmente
+        numeroRealDelCliente = message.from.replace(/[^0-9]/g, '');
     }
+
+    // Verificamos si ese número real está en la lista negra
+    if (pausados.has(numeroRealDelCliente)) {
+        console.log(`🙊 Chat pausado para ${numeroRealDelCliente}. (Silencio)`);
+        return; // IMPORTANTE: Cortamos aquí
+    }
+
 
     // =============================================
     // 🧠 PROCESAMIENTO DE IA Y AUDIOS
@@ -127,7 +138,7 @@ client.on('message', async (message) => {
 
     // 🔊 DETECTAR AUDIOS
     if (message.hasMedia && (message.type === 'audio' || message.type === 'ptt')) {
-        console.log('🎤 Audio detectado. Procesando...');
+        console.log('🎤 Audio detectado...');
         try {
             const media = await message.downloadMedia();
             const transcripcion = await transcribirAudio(media);
@@ -136,20 +147,20 @@ client.on('message', async (message) => {
                 console.log(`🗣️ Transcripción: "${transcripcion}"`);
                 mensajeUsuario = transcripcion; 
             } else {
-                await message.reply('🙉 Escuché el audio pero no entendí lo que dijiste.');
+                await message.reply('🙉 No pude entender el audio.');
                 return;
             }
         } catch (err) {
-            console.error('Error procesando audio:', err);
+            console.error('Error audio:', err);
             return;
         }
     }
 
     if (!mensajeUsuario || mensajeUsuario.length === 0) return;
 
-    // --- LÓGICA DE IA CON MEMORIA ---
-    const chatId = message.from;
-    console.log(`📩 Chat con ${chatId}: "${mensajeUsuario}"`);
+    // --- IA CON MEMORIA ---
+    const chatId = message.from; // Usamos el ID original para guardar el historial (sea LID o C.US)
+    console.log(`📩 Chat (${numeroRealDelCliente}): "${mensajeUsuario}"`);
 
     if (!historiales[chatId]) historiales[chatId] = [];
 
@@ -171,14 +182,14 @@ client.on('message', async (message) => {
         await chat.clearState();
 
     } catch (error) {
-        console.error('Error en IA:', error);
+        console.error('Error IA:', error);
         historiales[chatId] = [];
     }
 });
 
 
 // ==========================================
-// 🌐 SERVIDOR API (EXPRESS)
+// 🌐 SERVIDOR API
 // ==========================================
 const app = express();
 app.use(express.json());
@@ -186,26 +197,16 @@ app.use(express.json());
 app.post('/api/send-message', async (req, res) => {
     const { number, message, apiKey } = req.body;
 
-    if (apiKey !== 'TU_CLAVE_SECRETA_123') {
-        return res.status(403).json({ error: 'API Key incorrecta' });
-    }
-    if (!number || !message) {
-        return res.status(400).json({ error: 'Faltan datos' });
-    }
-    if (!client.info) {
-        return res.status(503).json({ error: 'Bot no conectado' });
-    }
+    if (apiKey !== 'TU_CLAVE_SECRETA_123') return res.status(403).json({ error: 'Key incorrecta' });
+    if (!number || !message) return res.status(400).json({ error: 'Faltan datos' });
+    if (!client.info) return res.status(503).json({ error: 'Bot offline' });
 
     try {
         const cleanNumber = number.replace(/\+/g, '').replace(/\s/g, '');
         const finalId = cleanNumber.includes('@c.us') ? cleanNumber : `${cleanNumber}@c.us`;
-
         await client.sendMessage(finalId, message);
-        console.log(`📤 API: Enviado a ${cleanNumber}`);
         return res.json({ success: true });
-
     } catch (error) {
-        console.error('❌ Error API:', error);
         return res.status(500).json({ error: error.message });
     }
 });
