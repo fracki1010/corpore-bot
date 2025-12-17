@@ -1,4 +1,5 @@
 require('dotenv').config();
+const express = require('express');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const fs = require('fs'); // <--- Movido aquí arriba para que funcione siempre
 const { getChatResponse } = require('./src/services/groqService');
@@ -37,7 +38,7 @@ client.on('ready', () => {
 
 // --- MEMORIA RAM DE CONVERSACIONES ---
 // Guardará los últimos mensajes de cada número
-const historiales = {}; 
+const historiales = {};
 
 client.on('message', async (message) => {
 
@@ -47,7 +48,7 @@ client.on('message', async (message) => {
 
     // --- MODO DIFUSIÓN (Tu código de admin) ---
     const NUMERO_ADMIN = '140278446997512@lid'; // <--- ASEGÚRATE QUE ESTE SEA TU ID
-    
+
     if (message.from === NUMERO_ADMIN && message.body.startsWith('!difusion ')) {
         // ... (Copia aquí tu lógica de difusión que ya funcionaba) ...
         // (Por brevedad no la repito toda, pero mantén tu bloque de difusión aquí)
@@ -58,7 +59,7 @@ client.on('message', async (message) => {
             const rawData = fs.readFileSync('clientes.json');
             clientes = JSON.parse(rawData);
         } catch (e) { await message.reply('❌ Error leyendo clientes.json'); return; }
-        
+
         await message.reply(`📢 Iniciando difusión...`);
         for (const cliente of clientes) {
             try {
@@ -71,7 +72,7 @@ client.on('message', async (message) => {
     }
 
     // --- LÓGICA DE IA CON MEMORIA ---
-    
+
     const chatId = message.from;
     console.log(`📩 Mensaje de ${chatId}: ${message.body}`);
 
@@ -113,5 +114,57 @@ client.on('message', async (message) => {
         historiales[chatId] = [];
     }
 });
+
+
+// ==========================================
+// 🌐 SERVIDOR API (PARA ENVIAR MENSAJES)
+// ==========================================
+const app = express();
+app.use(express.json()); // Permite recibir JSON
+
+// Endpoint para enviar mensaje
+// Se llama con POST a: /api/send-message
+app.post('/api/send-message', async (req, res) => {
+    const { number, message, apiKey } = req.body;
+
+    // 1. Seguridad básica (API KEY)
+    // Cambia '12345' por una clave secreta difícil
+    if (apiKey !== 'TU_CLAVE_SECRETA_123') {
+        return res.status(403).json({ error: 'Acceso denegado: API Key incorrecta' });
+    }
+
+    // 2. Validaciones
+    if (!number || !message) {
+        return res.status(400).json({ error: 'Faltan datos: number o message' });
+    }
+
+    if (!client.info) {
+        return res.status(503).json({ error: 'El bot de WhatsApp aún no está listo/conectado' });
+    }
+
+    try {
+        // 3. Formatear número (Agregar @c.us si falta)
+        // Eliminamos el '+' si viene, y quitamos espacios
+        const cleanNumber = number.replace(/\+/g, '').replace(/\s/g, '');
+        const finalId = cleanNumber.includes('@c.us') ? cleanNumber : `${cleanNumber}@c.us`;
+
+        // 4. Enviar mensaje
+        await client.sendMessage(finalId, message);
+
+        console.log(`📤 API: Mensaje enviado a ${cleanNumber}`);
+        return res.json({ success: true, status: 'Mensaje enviado correctamente' });
+
+    } catch (error) {
+        console.error('❌ Error en API:', error);
+        return res.status(500).json({ error: 'Error interno enviando mensaje', details: error.message });
+    }
+});
+
+// Iniciar servidor web en el puerto que asigne Railway (o 3000)
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`🌐 Servidor API escuchando en el puerto ${PORT}`);
+});
+// ==========================================
 
 client.initialize();
