@@ -1,36 +1,35 @@
+require('dotenv').config();
 const Groq = require("groq-sdk");
 const fs = require("fs");
 const path = require("path");
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-const getChatResponse = async (message) => {
+// Recibimos un ARRAY de mensajes (el historial), no solo un texto
+const getChatResponse = async (historialDeChat) => {
   try {
-    // 1. Leemos el archivo de texto en tiempo real
-    // 'process.cwd()' busca el archivo en la raiz donde corres el comando node
+    // 1. Leemos la info del negocio
     const infoPath = path.join(process.cwd(), 'business_info.txt');
-    
     let contextoNegocio = "";
-    
     try {
         contextoNegocio = fs.readFileSync(infoPath, 'utf8');
     } catch (err) {
-        console.error("Error leyendo business_info.txt:", err);
-        contextoNegocio = "Eres un asistente útil."; // Fallback por si falla el archivo
+        contextoNegocio = "Eres un asistente útil.";
     }
 
-    // 2. Enviamos el contenido del archivo como instrucción de sistema
+    // 2. Preparamos el mensaje de sistema (las instrucciones)
+    const systemMessage = {
+        role: "system",
+        content: contextoNegocio
+    };
+
+    // 3. Unimos: Instrucciones + Historial de la charla
+    // El historial ya viene con el formato [{role: 'user', content: '...'}, ...]
+    const messagesToSend = [systemMessage, ...historialDeChat];
+
+    // 4. Enviamos todo a Groq
     const chatCompletion = await groq.chat.completions.create({
-      messages: [
-        {
-          role: "system",
-          content: contextoNegocio // Aquí va lo que leíste del txt
-        },
-        {
-          role: "user",
-          content: message,
-        },
-      ],
+      messages: messagesToSend,
       model: "llama-3.3-70b-versatile",
       temperature: 0.5,
       max_tokens: 300,
@@ -39,8 +38,7 @@ const getChatResponse = async (message) => {
     return chatCompletion.choices[0]?.message?.content || "";
   } catch (error) {
     console.error("Error en Groq Service:", error);
-    // Si falla Groq, devolvemos un mensaje genérico para que WhatsApp no se quede mudo
-    return "Lo siento, estoy procesando muchas consultas. Intenta en un momento.";
+    return "Lo siento, tuve un pequeño lapso de memoria. ¿Podrías repetirme la pregunta?";
   }
 };
 

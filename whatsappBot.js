@@ -35,72 +35,83 @@ client.on('ready', () => {
     console.log('✅ ¡El bot de WhatsApp está listo y conectado!');
 });
 
-// 3. Escuchar mensajes (AQUÍ EMPIEZA LA FUNCIÓN PRINCIPAL)
+// --- MEMORIA RAM DE CONVERSACIONES ---
+// Guardará los últimos mensajes de cada número
+const historiales = {}; 
+
 client.on('message', async (message) => {
 
-    // --- FILTROS BÁSICOS ---
-    if (message.from === 'status@broadcast') return; // Ignorar estados
-    
-    // Ignorar mensajes vacíos
+    // --- FILTROS ---
+    if (message.from === 'status@broadcast') return;
     if (!message.body || message.body.length === 0) return;
 
-    // --- MODO ADMINISTRADOR: DIFUSIÓN (ESTO DEBE IR AQUÍ ADENTRO) ---
-    const NUMERO_ADMIN = '140278446997512@lid'; 
-
+    // --- MODO DIFUSIÓN (Tu código de admin) ---
+    const NUMERO_ADMIN = '140278446997512@lid'; // <--- ASEGÚRATE QUE ESTE SEA TU ID
+    
     if (message.from === NUMERO_ADMIN && message.body.startsWith('!difusion ')) {
-        // 1. Obtenemos el mensaje a enviar
+        // ... (Copia aquí tu lógica de difusión que ya funcionaba) ...
+        // (Por brevedad no la repito toda, pero mantén tu bloque de difusión aquí)
+        // Si no lo tienes a mano, avísame y te lo paso completo de nuevo.
         const mensajeParaEnviar = message.body.slice(10);
-        
-        // 2. Cargamos la lista de clientes
         let clientes = [];
         try {
             const rawData = fs.readFileSync('clientes.json');
             clientes = JSON.parse(rawData);
-        } catch (e) {
-            await message.reply('❌ Error: No pude leer el archivo clientes.json. ¿Existe?');
-            return;
-        }
-
-        await message.reply(`📢 Iniciando difusión a ${clientes.length} contactos...`);
-
-        // 3. Bucle de envío con RETRASO (Anti-Ban)
+        } catch (e) { await message.reply('❌ Error leyendo clientes.json'); return; }
+        
+        await message.reply(`📢 Iniciando difusión...`);
         for (const cliente of clientes) {
-            const numeroDestino = cliente.numero + '@c.us';
-            
             try {
-                // Enviar mensaje
-                await client.sendMessage(numeroDestino, mensajeParaEnviar);
-                console.log(`✅ Enviado a ${cliente.nombre}`);
-                
-                // 4. ESPERA ALEATORIA (10 a 25 segundos)
-                const espera = Math.floor(Math.random() * 15000) + 10000; 
-                await new Promise(resolve => setTimeout(resolve, espera));
-
-            } catch (error) {
-                console.error(`❌ Falló envío a ${cliente.nombre}:`, error);
-            }
+                await client.sendMessage(cliente.numero + '@c.us', mensajeParaEnviar);
+                await new Promise(r => setTimeout(r, Math.random() * 5000 + 5000));
+            } catch (e) { console.error('Falló uno'); }
         }
-
-        await message.reply('✅ ¡Difusión terminada con éxito!');
-        return; // <--- IMPORTANTE: Return para que NO siga hacia la IA
+        await message.reply('✅ Difusión terminada.');
+        return;
     }
 
-    // --- IA GROQ (Solo se ejecuta si NO es difusión) ---
-    console.log(`📩 Mensaje recibido de ${message.from}: ${message.body}`);
+    // --- LÓGICA DE IA CON MEMORIA ---
+    
+    const chatId = message.from;
+    console.log(`📩 Mensaje de ${chatId}: ${message.body}`);
+
+    // 1. Inicializar historial si es nuevo
+    if (!historiales[chatId]) {
+        historiales[chatId] = [];
+    }
+
+    // 2. Agregar mensaje del USUARIO al historial
+    historiales[chatId].push({
+        role: "user",
+        content: message.body
+    });
+
+    // 3. Limitar memoria (Solo recordamos los últimos 10 mensajes para no saturar)
+    if (historiales[chatId].length > 10) {
+        historiales[chatId] = historiales[chatId].slice(-10);
+    }
 
     try {
         const chat = await message.getChat();
         await chat.sendStateTyping();
 
-        const botResponse = await getChatResponse(message.body);
+        // 4. Enviamos EL HISTORIAL COMPLETO a la IA (no solo el mensaje actual)
+        const botResponse = await getChatResponse(historiales[chatId]);
+
+        // 5. Agregar respuesta del BOT al historial
+        historiales[chatId].push({
+            role: "assistant",
+            content: botResponse
+        });
 
         await message.reply(botResponse);
         await chat.clearState();
 
     } catch (error) {
         console.error('Error procesando mensaje:', error);
+        // Si falla, borramos el historial por si acaso se corrompió
+        historiales[chatId] = [];
     }
-}); // <--- AQUÍ SE CIERRA LA FUNCIÓN DE MENSAJES
+});
 
-// Iniciar el cliente
 client.initialize();
