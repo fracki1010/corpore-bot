@@ -45,7 +45,7 @@ client.on('message', async (message) => {
     // TU ID DE ADMIN
     const NUMERO_ADMIN = '140278446997512@lid'; 
 
-    // 1. Obtener número real del cliente (limpio)
+    // 1. Obtener número real del cliente
     let numeroRealDelCliente = "";
     try {
         const contact = await message.getContact();
@@ -72,7 +72,6 @@ client.on('message', async (message) => {
             let numeroLimpio = rawInput.replace(/[^0-9]/g, '');
             if (numeroLimpio.length < 5) return;
             pausados.delete(numeroLimpio);
-            // Reiniciar memoria
             Object.keys(historiales).forEach(key => {
                 if(key.includes(numeroLimpio)) delete historiales[key];
             });
@@ -102,7 +101,7 @@ client.on('message', async (message) => {
     }
 
     // =============================================
-    // 🚦 CHECK DE PAUSA (SI YA ESTÁ PAUSADO)
+    // 🚦 CHECK DE PAUSA
     // =============================================
     if (pausados.has(numeroRealDelCliente)) {
         console.log(`🙊 Chat pausado con ${numeroRealDelCliente}. (Silencio)`);
@@ -110,37 +109,48 @@ client.on('message', async (message) => {
     }
 
     // =============================================
-    // 🕵️ DETECTOR AUTOMÁTICO DE "HUMANO" / FINALIZAR
+    // 🕵️ DETECTOR AUTOMÁTICO DE "HUMANO" (SOLO LUNES A VIERNES)
     // =============================================
-    // Aquí definimos las palabras clave que activan la alarma
     const mensajeTexto = message.body ? message.body.toLowerCase() : "";
     
     const frasesGatillo = [
         "hablar con humano",
         "asesor",
         "hablar con una persona",
-        "finalizar inscripcion",   // Lo que pediste
-        "perdi el turno",          // Lo que pediste
-        "perdí el turno",          // Con tilde
+        "finalizar inscripcion",
+        "perdi el turno",
+        "perdí el turno",
         "finalizada la inscripcion"
     ];
 
-    // Si el mensaje contiene alguna de esas frases...
     if (frasesGatillo.some(frase => mensajeTexto.includes(frase))) {
-        console.log(`🚨 DETECTADO PEDIDO DE HUMANO POR: ${numeroRealDelCliente}`);
-
-        // 1. Pausamos al bot automáticamente
-        pausados.add(numeroRealDelCliente);
-
-        // 2. Avisamos al cliente
-        await message.reply("⏳ Entendido. Te derivo con un asesor humano para que revise tu caso. El bot se ha pausado y te responderemos en breve.");
-
-        // 3. Te avisamos a ti (Admin)
-        const alertaAdmin = `⚠️ *ATENCIÓN - INTERVENCIÓN REQUERIDA* ⚠️\n\n👤 Cliente: ${numeroRealDelCliente}\n💬 Dijo: "${message.body}"\n\n🛑 El bot se ha pausado automáticamente. Respondele tú y cuando termines envía: !on ${numeroRealDelCliente}`;
         
-        await client.sendMessage(NUMERO_ADMIN, alertaAdmin);
-        
-        return; // Cortamos aquí para que la IA no responda nada más
+        // --- 📅 NUEVO: VERIFICACIÓN DE DÍA DE SEMANA ---
+        // Obtenemos la fecha actual en Argentina
+        const fechaArgentina = new Date().toLocaleString("en-US", {timeZone: "America/Argentina/Buenos_Aires"});
+        const diaSemana = new Date(fechaArgentina).getDay(); 
+        // 0 = Domingo, 6 = Sábado. Los días hábiles son 1, 2, 3, 4, 5.
+
+        const esFinDeSemana = (diaSemana === 0 || diaSemana === 6);
+
+        if (!esFinDeSemana) {
+            // SI ES DÍA DE SEMANA (Lunes a Viernes) -> ACTIVAMOS LA ALERTA
+            console.log(`🚨 DETECTADO PEDIDO DE HUMANO POR: ${numeroRealDelCliente}`);
+
+            pausados.add(numeroRealDelCliente);
+
+            await message.reply("⏳ Entendido. Te derivo con un asesor humano para que revise tu caso. El bot se ha pausado y te responderemos en breve.");
+
+            const alertaAdmin = `⚠️ *ATENCIÓN (Día Hábil)* ⚠️\n\n👤 Cliente: ${numeroRealDelCliente}\n💬 Dijo: "${message.body}"\n\n🛑 El bot se ha pausado. Respondele tú y envía !on ${numeroRealDelCliente} al terminar.`;
+            
+            await client.sendMessage(NUMERO_ADMIN, alertaAdmin);
+            
+            return; // Cortamos aquí
+        } else {
+            // SI ES FIN DE SEMANA -> NO HACEMOS NADA
+            console.log(`📅 Pedido de humano detectado, pero es Fin de Semana. Dejamos que la IA responda.`);
+            // No hacemos return, dejamos que el código siga hacia abajo y la IA responda normalmente.
+        }
     }
 
 
@@ -195,7 +205,6 @@ client.on('message', async (message) => {
 const app = express();
 app.use(express.json());
 app.post('/api/send-message', async (req, res) => {
-    // ... (Tu código API de siempre) ...
     const { number, message, apiKey } = req.body;
     if (apiKey !== 'TU_CLAVE_SECRETA_123') return res.status(403).json({ error: 'Key incorrecta' });
     if (!number || !message) return res.status(400).json({ error: 'Faltan datos' });
