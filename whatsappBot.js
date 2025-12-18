@@ -33,9 +33,10 @@ client.on('ready', () => {
     console.log('✅ ¡El bot de WhatsApp está listo y conectado!');
 });
 
-// --- MEMORIA ---
+// --- VARIABLES DE ESTADO ---
 const historiales = {};
 const pausados = new Set(); 
+const esperandoNombre = {}; // <--- NUEVA: Para saber a quién le preguntamos el nombre
 
 client.on('message', async (message) => {
 
@@ -45,7 +46,7 @@ client.on('message', async (message) => {
     // TU ID DE ADMIN
     const NUMERO_ADMIN = '140278446997512@lid'; 
 
-    // 1. Obtener número real del cliente
+    // Obtener número real para uso interno/logs
     let numeroRealDelCliente = "";
     try {
         const contact = await message.getContact();
@@ -53,32 +54,43 @@ client.on('message', async (message) => {
     } catch (err) {
         numeroRealDelCliente = message.from.replace(/[^0-9]/g, '');
     }
+    // IMPORTANTE: Asegurarnos que el ID interno sea consistente
+    const chatId = message.from; 
 
     // =============================================
     // 🛡️ ZONA DE ADMIN (COMANDOS MANUALES)
     // =============================================
     if (message.from === NUMERO_ADMIN) {
+        // !off
         if (message.body.startsWith('!off ')) {
             let rawInput = message.body.split(' ')[1] || "";
             let numeroLimpio = rawInput.replace(/[^0-9]/g, '');
             if (numeroLimpio.length < 5) return;
-            pausados.add(numeroLimpio);
+            pausados.add(numeroLimpio); // Pausamos por número real
             await message.reply(`🛑 Bot PAUSADO manualmente para: ${numeroLimpio}.`);
             return;
         }
 
+        // !on
         if (message.body.startsWith('!on ')) {
             let rawInput = message.body.split(' ')[1] || "";
             let numeroLimpio = rawInput.replace(/[^0-9]/g, '');
             if (numeroLimpio.length < 5) return;
+            
             pausados.delete(numeroLimpio);
+            
+            // Limpiamos estados
+            delete esperandoNombre[chatId]; 
+            // Limpiamos historial relacionado
             Object.keys(historiales).forEach(key => {
                 if(key.includes(numeroLimpio)) delete historiales[key];
             });
+
             await message.reply(`✅ Bot REACTIVADO para: ${numeroLimpio}.`);
             return;
         }
 
+        // !difusion
         if (message.body.startsWith('!difusion ')) {
             const mensajeParaEnviar = message.body.slice(10);
             let clientes = [];
@@ -101,18 +113,44 @@ client.on('message', async (message) => {
     }
 
     // =============================================
+    // 📝 PASO 2: RECIBIR EL NOMBRE DEL CLIENTE
+    // =============================================
+    // Si este chat estaba esperando que le dijeran el nombre...
+    if (esperandoNombre[chatId]) {
+        
+        // El mensaje actual ES el nombre
+        const nombreCliente = message.body;
+        const motivoOriginal = esperandoNombre[chatId].motivo;
+
+        // 1. Te avisamos a ti (ADMIN) con el NÚMERO REAL
+        const alertaAdmin = `⚠️ *NUEVO CASO (Humano Requerido)* ⚠️\n\n👤 Nombre: *${nombreCliente}*\n📱 Teléfono: ${numeroRealDelCliente}\n💬 Motivo: "${motivoOriginal}"\n\n🛑 El bot está pausado. Escribe al cliente y cuando termines envía: !on ${numeroRealDelCliente}`;
+        
+        await client.sendMessage(NUMERO_ADMIN, alertaAdmin);
+
+        // 2. Confirmamos al cliente
+        await message.reply(`Gracias ${nombreCliente}. He notificado a un asesor. En breve se comunicarán contigo.`);
+
+        // 3. Limpiamos el estado de espera, PERO mantenemos el bloqueo en 'pausados'
+        delete esperandoNombre[chatId];
+        
+        // Agregamos el número real a la lista de pausados para que la IA no moleste
+        pausados.add(numeroRealDelCliente);
+        
+        return; // Fin del proceso
+    }
+
+    // =============================================
     // 🚦 CHECK DE PAUSA
     // =============================================
     if (pausados.has(numeroRealDelCliente)) {
-        console.log(`🙊 Chat pausado con ${numeroRealDelCliente}. (Silencio)`);
+        console.log(`🙊 Chat pausado con ${numeroRealDelCliente}.`);
         return; 
     }
 
     // =============================================
-    // 🕵️ DETECTOR AUTOMÁTICO DE "HUMANO" (SOLO LUNES A VIERNES)
+    // 🕵️ PASO 1: DETECTOR DE FRASE GATILLO
     // =============================================
     const mensajeTexto = message.body ? message.body.toLowerCase() : "";
-    
     const frasesGatillo = [
         "hablar con humano",
         "asesor",
@@ -125,59 +163,51 @@ client.on('message', async (message) => {
 
     if (frasesGatillo.some(frase => mensajeTexto.includes(frase))) {
         
-        // --- 📅 NUEVO: VERIFICACIÓN DE DÍA DE SEMANA ---
-        // Obtenemos la fecha actual en Argentina
+        // Verificación de Día de Semana (Lunes a Viernes)
         const fechaArgentina = new Date().toLocaleString("en-US", {timeZone: "America/Argentina/Buenos_Aires"});
         const diaSemana = new Date(fechaArgentina).getDay(); 
-        // 0 = Domingo, 6 = Sábado. Los días hábiles son 1, 2, 3, 4, 5.
-
         const esFinDeSemana = (diaSemana === 0 || diaSemana === 6);
 
         if (!esFinDeSemana) {
-            // SI ES DÍA DE SEMANA (Lunes a Viernes) -> ACTIVAMOS LA ALERTA
-            console.log(`🚨 DETECTADO PEDIDO DE HUMANO POR: ${numeroRealDelCliente}`);
+            console.log(`🚨 Solicitud de humano iniciada por: ${numeroRealDelCliente}`);
 
+            // 1. Pausamos la IA inmediatamente para que no responda tonterías
             pausados.add(numeroRealDelCliente);
 
-            await message.reply("⏳ Entendido. Te derivo con un asesor humano para que revise tu caso. El bot se ha pausado y te responderemos en breve.");
+            // 2. Guardamos el motivo y marcamos que esperamos el nombre
+            esperandoNombre[chatId] = { 
+                motivo: message.body // Guardamos lo que dijo (ej: "perdí el turno")
+            };
 
-            const alertaAdmin = `⚠️ *ATENCIÓN (Día Hábil)* ⚠️\n\n👤 Cliente: ${numeroRealDelCliente}\n💬 Dijo: "${message.body}"\n\n🛑 El bot se ha pausado. Respondele tú y envía !on ${numeroRealDelCliente} al terminar.`;
+            // 3. Pedimos el nombre
+            await message.reply("Entendido. Para derivarte con el asesor correcto, por favor **escribe tu nombre completo** a continuación:");
             
-            await client.sendMessage(NUMERO_ADMIN, alertaAdmin);
-            
-            return; // Cortamos aquí
+            // IMPORTANTE: Quitamos de 'pausados' TEMPORALMENTE solo para permitir que entre el siguiente mensaje (el nombre)
+            // La lógica de 'esperandoNombre' arriba interceptará el mensaje antes que la IA.
+            pausados.delete(numeroRealDelCliente);
+
+            return; 
         } else {
-            // SI ES FIN DE SEMANA -> NO HACEMOS NADA
-            console.log(`📅 Pedido de humano detectado, pero es Fin de Semana. Dejamos que la IA responda.`);
-            // No hacemos return, dejamos que el código siga hacia abajo y la IA responda normalmente.
+            // Fin de semana: Dejar pasar a la IA
+            console.log(`📅 Pedido de humano en fin de semana. Ignorado.`);
         }
     }
-
 
     // =============================================
     // 🧠 PROCESAMIENTO DE IA Y AUDIOS (NORMAL)
     // =============================================
-    
     let mensajeUsuario = message.body;
 
-    // 🔊 Audios
     if (message.hasMedia && (message.type === 'audio' || message.type === 'ptt')) {
         try {
             const media = await message.downloadMedia();
             const transcripcion = await transcribirAudio(media);
-            if (transcripcion) {
-                mensajeUsuario = transcripcion; 
-            } else {
-                await message.reply('🙉 No pude entender el audio.');
-                return;
-            }
+            if (transcripcion) mensajeUsuario = transcripcion; 
+            else { await message.reply('🙉 No pude entender el audio.'); return; }
         } catch (err) { console.error(err); return; }
     }
 
     if (!mensajeUsuario || mensajeUsuario.length === 0) return;
-
-    // --- IA Memoria ---
-    const chatId = message.from; 
 
     if (!historiales[chatId]) historiales[chatId] = [];
     historiales[chatId].push({ role: "user", content: mensajeUsuario });
@@ -186,13 +216,10 @@ client.on('message', async (message) => {
     try {
         const chat = await message.getChat();
         await chat.sendStateTyping();
-
         const botResponse = await getChatResponse(historiales[chatId]);
-
         historiales[chatId].push({ role: "assistant", content: botResponse });
         await message.reply(botResponse);
         await chat.clearState();
-
     } catch (error) {
         console.error('Error IA:', error);
         historiales[chatId] = [];
