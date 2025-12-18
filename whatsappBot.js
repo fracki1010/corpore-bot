@@ -22,7 +22,6 @@ const client = new Client({
     }
 });
 
-// 1. Sistema de QR
 client.on('qr', (qr) => {
     console.log('⚠️ QR RECIBIDO');
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`;
@@ -30,64 +29,58 @@ client.on('qr', (qr) => {
     console.log(qrUrl);
 });
 
-// 2. Confirmación
 client.on('ready', () => {
     console.log('✅ ¡El bot de WhatsApp está listo y conectado!');
 });
 
-// --- MEMORIA RAM ---
+// --- MEMORIA ---
 const historiales = {};
-// AHORA guardaremos solo los NÚMEROS LIMPIOS (ej: "549261...")
 const pausados = new Set(); 
 
 client.on('message', async (message) => {
 
-    // --- FILTROS BÁSICOS ---
+    // --- FILTROS ---
     if (message.from === 'status@broadcast') return;
 
-    // Tu ID de Admin (el que sale en el log, aunque sea LID)
+    // TU ID DE ADMIN
     const NUMERO_ADMIN = '140278446997512@lid'; 
 
+    // 1. Obtener número real del cliente (limpio)
+    let numeroRealDelCliente = "";
+    try {
+        const contact = await message.getContact();
+        numeroRealDelCliente = contact.number; 
+    } catch (err) {
+        numeroRealDelCliente = message.from.replace(/[^0-9]/g, '');
+    }
+
     // =============================================
-    // 🛡️ ZONA DE COMANDOS DE ADMINISTRADOR
+    // 🛡️ ZONA DE ADMIN (COMANDOS MANUALES)
     // =============================================
     if (message.from === NUMERO_ADMIN) {
-        
-        // COMANDO: !off NUMERO (Pausar bot para un cliente)
         if (message.body.startsWith('!off ')) {
-            // Limpiamos el número: quitamos espacios, +, @c.us, etc. Solo dejamos dígitos.
             let rawInput = message.body.split(' ')[1] || "";
             let numeroLimpio = rawInput.replace(/[^0-9]/g, '');
-
-            if (numeroLimpio.length < 5) return; // Validación básica
-            
+            if (numeroLimpio.length < 5) return;
             pausados.add(numeroLimpio);
-            await message.reply(`🛑 Bot PAUSADO para el número: ${numeroLimpio}.`);
+            await message.reply(`🛑 Bot PAUSADO manualmente para: ${numeroLimpio}.`);
             return;
         }
 
-        // COMANDO: !on NUMERO (Reactivar bot)
         if (message.body.startsWith('!on ')) {
             let rawInput = message.body.split(' ')[1] || "";
             let numeroLimpio = rawInput.replace(/[^0-9]/g, '');
-
             if (numeroLimpio.length < 5) return;
-
             pausados.delete(numeroLimpio);
-            
-            // Borramos la memoria de ese número (usando lógica aproximada) para reiniciar
-            // (Iteramos para encontrar si había un historial con ese número)
+            // Reiniciar memoria
             Object.keys(historiales).forEach(key => {
                 if(key.includes(numeroLimpio)) delete historiales[key];
             });
-
-            await message.reply(`✅ Bot REACTIVADO para el número: ${numeroLimpio}.`);
+            await message.reply(`✅ Bot REACTIVADO para: ${numeroLimpio}.`);
             return;
         }
 
-        // COMANDO: !difusion
         if (message.body.startsWith('!difusion ')) {
-            // ... (Tu lógica de difusión, mantenla igual) ...
             const mensajeParaEnviar = message.body.slice(10);
             let clientes = [];
             try {
@@ -95,7 +88,7 @@ client.on('message', async (message) => {
                 clientes = JSON.parse(rawData);
             } catch (e) { await message.reply('❌ Error leyendo clientes.json'); return; }
 
-            await message.reply(`📢 Iniciando difusión...`);
+            await message.reply(`📢 Iniciando difusión a ${clientes.length} contactos...`);
             for (const cliente of clientes) {
                 try {
                     const dest = cliente.numero.includes('@') ? cliente.numero : `${cliente.numero}@c.us`;
@@ -109,66 +102,76 @@ client.on('message', async (message) => {
     }
 
     // =============================================
-    // 🚦 CHECK DE PAUSA INTELIGENTE (FIX LIDs)
+    // 🚦 CHECK DE PAUSA (SI YA ESTÁ PAUSADO)
     // =============================================
-    // Obtenemos el contacto real para ver su número verdadero, 
-    // sin importar si viene como LID o C.US
-    let numeroRealDelCliente = "";
-    
-    try {
-        const contact = await message.getContact();
-        numeroRealDelCliente = contact.number; // Esto devuelve el número "549..." limpio
-    } catch (err) {
-        // Si falla, intentamos limpiar el ID manualmente
-        numeroRealDelCliente = message.from.replace(/[^0-9]/g, '');
-    }
-
-    // Verificamos si ese número real está en la lista negra
     if (pausados.has(numeroRealDelCliente)) {
-        console.log(`🙊 Chat pausado para ${numeroRealDelCliente}. (Silencio)`);
-        return; // IMPORTANTE: Cortamos aquí
+        console.log(`🙊 Chat pausado con ${numeroRealDelCliente}. (Silencio)`);
+        return; 
+    }
+
+    // =============================================
+    // 🕵️ DETECTOR AUTOMÁTICO DE "HUMANO" / FINALIZAR
+    // =============================================
+    // Aquí definimos las palabras clave que activan la alarma
+    const mensajeTexto = message.body ? message.body.toLowerCase() : "";
+    
+    const frasesGatillo = [
+        "hablar con humano",
+        "asesor",
+        "hablar con una persona",
+        "finalizar inscripcion",   // Lo que pediste
+        "perdi el turno",          // Lo que pediste
+        "perdí el turno",          // Con tilde
+        "finalizada la inscripcion"
+    ];
+
+    // Si el mensaje contiene alguna de esas frases...
+    if (frasesGatillo.some(frase => mensajeTexto.includes(frase))) {
+        console.log(`🚨 DETECTADO PEDIDO DE HUMANO POR: ${numeroRealDelCliente}`);
+
+        // 1. Pausamos al bot automáticamente
+        pausados.add(numeroRealDelCliente);
+
+        // 2. Avisamos al cliente
+        await message.reply("⏳ Entendido. Te derivo con un asesor humano para que revise tu caso. El bot se ha pausado y te responderemos en breve.");
+
+        // 3. Te avisamos a ti (Admin)
+        const alertaAdmin = `⚠️ *ATENCIÓN - INTERVENCIÓN REQUERIDA* ⚠️\n\n👤 Cliente: ${numeroRealDelCliente}\n💬 Dijo: "${message.body}"\n\n🛑 El bot se ha pausado automáticamente. Respondele tú y cuando termines envía: !on ${numeroRealDelCliente}`;
+        
+        await client.sendMessage(NUMERO_ADMIN, alertaAdmin);
+        
+        return; // Cortamos aquí para que la IA no responda nada más
     }
 
 
     // =============================================
-    // 🧠 PROCESAMIENTO DE IA Y AUDIOS
+    // 🧠 PROCESAMIENTO DE IA Y AUDIOS (NORMAL)
     // =============================================
     
     let mensajeUsuario = message.body;
 
-    // 🔊 DETECTAR AUDIOS
+    // 🔊 Audios
     if (message.hasMedia && (message.type === 'audio' || message.type === 'ptt')) {
-        console.log('🎤 Audio detectado...');
         try {
             const media = await message.downloadMedia();
             const transcripcion = await transcribirAudio(media);
-            
             if (transcripcion) {
-                console.log(`🗣️ Transcripción: "${transcripcion}"`);
                 mensajeUsuario = transcripcion; 
             } else {
                 await message.reply('🙉 No pude entender el audio.');
                 return;
             }
-        } catch (err) {
-            console.error('Error audio:', err);
-            return;
-        }
+        } catch (err) { console.error(err); return; }
     }
 
     if (!mensajeUsuario || mensajeUsuario.length === 0) return;
 
-    // --- IA CON MEMORIA ---
-    const chatId = message.from; // Usamos el ID original para guardar el historial (sea LID o C.US)
-    console.log(`📩 Chat (${numeroRealDelCliente}): "${mensajeUsuario}"`);
+    // --- IA Memoria ---
+    const chatId = message.from; 
 
     if (!historiales[chatId]) historiales[chatId] = [];
-
     historiales[chatId].push({ role: "user", content: mensajeUsuario });
-
-    if (historiales[chatId].length > 10) {
-        historiales[chatId] = historiales[chatId].slice(-10);
-    }
+    if (historiales[chatId].length > 10) historiales[chatId] = historiales[chatId].slice(-10);
 
     try {
         const chat = await message.getChat();
@@ -177,7 +180,6 @@ client.on('message', async (message) => {
         const botResponse = await getChatResponse(historiales[chatId]);
 
         historiales[chatId].push({ role: "assistant", content: botResponse });
-
         await message.reply(botResponse);
         await chat.clearState();
 
@@ -187,30 +189,24 @@ client.on('message', async (message) => {
     }
 });
 
-
 // ==========================================
-// 🌐 SERVIDOR API
+// 🌐 API
 // ==========================================
 const app = express();
 app.use(express.json());
-
 app.post('/api/send-message', async (req, res) => {
+    // ... (Tu código API de siempre) ...
     const { number, message, apiKey } = req.body;
-
     if (apiKey !== 'TU_CLAVE_SECRETA_123') return res.status(403).json({ error: 'Key incorrecta' });
     if (!number || !message) return res.status(400).json({ error: 'Faltan datos' });
-    if (!client.info) return res.status(503).json({ error: 'Bot offline' });
-
+    
     try {
         const cleanNumber = number.replace(/\+/g, '').replace(/\s/g, '');
         const finalId = cleanNumber.includes('@c.us') ? cleanNumber : `${cleanNumber}@c.us`;
         await client.sendMessage(finalId, message);
         return res.json({ success: true });
-    } catch (error) {
-        return res.status(500).json({ error: error.message });
-    }
+    } catch (error) { return res.status(500).json({ error: error.message }); }
 });
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🌐 API lista en puerto ${PORT}`));
 
