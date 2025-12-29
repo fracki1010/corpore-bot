@@ -1,5 +1,5 @@
 
-export const getNumberContact = async (message) => {
+const getNumberContact = async (message) => {
     let numeroRealDelCliente = "";
     try {
         const contact = await message.getContact();
@@ -9,3 +9,5 @@ export const getNumberContact = async (message) => {
     }
     return numeroRealDelCliente;
 }
+
+module.exports = { getNumberContact };
