@@ -46,7 +46,7 @@ client.on('message', async (message) => {
     const NUMEROS_ADMINS = [
         '140278446997512@lid',  // Tu admin original
         '5492622586046@c.us',   // Agus
-        '5492610000000@c.us'    // Anto
+        '15152795652173@lid'    // Anto
     ];
 
 
