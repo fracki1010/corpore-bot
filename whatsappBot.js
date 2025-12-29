@@ -40,7 +40,6 @@ const pausados = new Set();
 const esperandoNombre = {};
 
 client.on('message', async (message) => {
-
     if (message.from === 'status@broadcast') return;
 
     const NUMEROS_ADMINS = [
@@ -49,60 +48,67 @@ client.on('message', async (message) => {
         '15152795652173@lid'    // Anto
     ];
 
-
+    // Obtenemos el número limpio (ej: 549112233)
     const numeroRealDelCliente = await getNumberContact(message);
-
-
     const chatId = message.from;
-
-    console.log(chatId);
-    
 
     // --- ZONA ADMIN ---
     if (NUMEROS_ADMINS.includes(message.from)) {
+        // COMANDO PAUSAR: !off 54911...
         if (message.body.startsWith('!off ')) {
-            let n = message.body.split(' ')[1]?.replace(/[^0-9]/g, '');
-            if (n && n.length > 4) { pausados.add(n); await message.reply(`🛑 Pausado: ${n}`); }
-            return;
-        }
-        if (message.body.startsWith('!on ')) {
-            let n = message.body.split(' ')[1]?.replace(/[^0-9]/g, '');
-            if (n && n.length > 4) {
-                pausados.delete(n);
-                delete esperandoNombre[chatId];
-                Object.keys(historiales).forEach(k => { if (k.includes(n)) delete historiales[k]; });
-                await message.reply(`✅ Reactivado: ${n}`);
+            let n = message.body.split(' ')[1]?.replace(/\D/g, ''); // Limpia todo lo que no sea número
+            if (n && n.length > 4) { 
+                pausados.add(n); 
+                console.log(`Lista de pausados actual:`, Array.from(pausados));
+                await message.reply(`🛑 Bot PAUSADO para: ${n}`); 
             }
             return;
         }
-        // ... (Mantén tu lógica de difusión aquí si la usas)
+        
+        // COMANDO ACTIVAR: !on 54911...
+        if (message.body.startsWith('!on ')) {
+            let n = message.body.split(' ')[1]?.replace(/\D/g, '');
+            if (n && n.length > 4) {
+                pausados.delete(n);
+                // Limpiamos rastro de espera de nombre y chats
+                delete esperandoNombre[chatId];
+                Object.keys(historiales).forEach(k => { if (k.includes(n)) delete historiales[k]; });
+                await message.reply(`✅ Bot REACTIVADO para: ${n}`);
+            }
+            return;
+        }
+    }
+
+    // --- VERIFICACIÓN DE PAUSA (Aquí es donde fallaba) ---
+    if (pausados.has(numeroRealDelCliente)) {
+        console.log(`Bloqueado: Mensaje de ${numeroRealDelCliente} ignorado por pausa.`);
+        return;
     }
 
     // --- PASO 2: RECIBIR NOMBRE ---
     if (esperandoNombre[chatId]) {
         const nombreCliente = message.body;
         const motivoOriginal = esperandoNombre[chatId].motivo;
-        const origen = esperandoNombre[chatId].origen; // "manual" o "cierre_venta"
+        const origen = esperandoNombre[chatId].origen;
 
-        // Mensaje diferente para el admin dependiendo si fue cierre de venta o reclamo
         let tituloAlerta = origen === 'cierre_venta' ? '💰 ¡NUEVA VENTA CERRADA!' : '⚠️ NUEVO RECLAMO/CONSULTA';
+        const alertaAdmin = `${tituloAlerta}\n\n👤 Nombre: *${nombreCliente}*\n📱 Teléfono: ${numeroRealDelCliente}\n💬 Contexto: "${motivoOriginal}"\n\n🛑 El bot se pausó automáticamente. (!on ${numeroRealDelCliente} para reactivar)`;
 
-        const alertaAdmin = `${tituloAlerta}\n\n👤 Nombre: *${nombreCliente}*\n📱 Teléfono: ${numeroRealDelCliente}\n💬 Contexto: "${motivoOriginal}"\n\n🛑 El bot está pausado. ¡Atiéndelo para cerrar! (!on ${numeroRealDelCliente} al terminar)`;
+        // Avisar a todos los admins
+        for (const admin of NUMEROS_ADMINS) {
+            await client.sendMessage(admin, alertaAdmin);
+        }
 
-        await client.sendMessage(NUMERO_ADMIN, alertaAdmin);
-        await message.reply(`¡Excelente ${nombreCliente}! Ya le avisé al administrador para que finalice tu inscripción. Te escribirá en breve.`);
+        await message.reply(`¡Excelente ${nombreCliente}! Ya le avisé al equipo para que finalice tu gestión. Te escribiremos en breve.`);
 
         delete esperandoNombre[chatId];
-        pausados.add(numeroRealDelCliente);
+        pausados.add(numeroRealDelCliente); // Pausa automática tras pedir nombre
         return;
     }
 
-    if (pausados.has(numeroRealDelCliente)) return;
-
-    // --- PROCESAR MENSAJE ---
+    // --- PROCESAR MENSAJE (IA) ---
     let mensajeUsuario = message.body;
     if (message.hasMedia && (message.type === 'audio' || message.type === 'ptt')) {
-
         try {
             const media = await message.downloadMedia();
             const t = await transcribirAudio(media);
@@ -111,14 +117,14 @@ client.on('message', async (message) => {
     }
     if (!mensajeUsuario) return;
 
-    // --- DETECTOR MANUAL (Palabras clave) ---
-    const frasesGatillo = ["hablar con humano", "asesor", "finalizar inscripcion", "perdi el turno"];
+    // --- DETECTOR MANUAL ---
+    const frasesGatillo = ["hablar con humano", "asesor", "finalizar inscripcion", "perdi el turno", "pagar", "comprar"];
     if (frasesGatillo.some(f => mensajeUsuario.toLowerCase().includes(f))) {
         await iniciarTransferencia(chatId, numeroRealDelCliente, mensajeUsuario, "manual", message);
         return;
     }
 
-    // --- IA CON DETECCIÓN DE CIERRE ---
+    // --- LÓGICA DE IA (GROQ) ---
     if (!historiales[chatId]) historiales[chatId] = [];
     historiales[chatId].push({ role: "user", content: mensajeUsuario });
     if (historiales[chatId].length > 10) historiales[chatId] = historiales[chatId].slice(-10);
@@ -127,26 +133,19 @@ client.on('message', async (message) => {
         const chat = await message.getChat();
         await chat.sendStateTyping();
 
-        // Obtenemos respuesta de Groq
         let botResponse = await getChatResponse(historiales[chatId]);
 
-        // 🕵️ DETECTOR DE CIERRE DE VENTA AUTOMÁTICO
         if (botResponse.includes('[TRANSFERIR_HUMANO]')) {
-            console.log("💰 INTELIGENCIA ARTIFICIAL DETECTÓ CIERRE DE VENTA");
-            // No enviamos la respuesta de la IA (que solo dice [TRANSFERIR...])
-            // Iniciamos el flujo de pedir nombre
-            await iniciarTransferencia(chatId, numeroRealDelCliente, "Cliente listo para inscribirse/comprar", "cierre_venta", message);
+            await iniciarTransferencia(chatId, numeroRealDelCliente, "IA detectó intención de compra", "cierre_venta", message);
             return;
         }
 
-        // Si no hay cierre, respondemos normal
         historiales[chatId].push({ role: "assistant", content: botResponse });
         await message.reply(botResponse);
         await chat.clearState();
 
     } catch (error) {
         console.error('Error IA:', error);
-        historiales[chatId] = [];
     }
 });
 
