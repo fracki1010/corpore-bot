@@ -46,8 +46,7 @@ client.on('message', async (message) => {
     const NUMEROS_ADMINS = [
         '140278446997512@lid',  // Tu admin original
         '5491123456789@c.us',   // <--- Agrega otro número aquí
-        '5492610000000@c.us' ,   // <--- Agrega otro número aquí
-        '5492622517447'
+        '5492610000000@c.us'    // <--- Agrega otro número aquí
     ];
 
 
@@ -57,12 +56,10 @@ client.on('message', async (message) => {
     const chatId = message.from;
 
     console.log(chatId);
-    console.log(numeroRealDelCliente);
-    
     
 
     // --- ZONA ADMIN ---
-    if (NUMEROS_ADMINS.includes(numeroRealDelCliente)) {
+    if (NUMEROS_ADMINS.includes(message.from)) {
         if (message.body.startsWith('!off ')) {
             let n = message.body.split(' ')[1]?.replace(/[^0-9]/g, '');
             if (n && n.length > 4) { pausados.add(n); await message.reply(`🛑 Pausado: ${n}`); }
