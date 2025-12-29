@@ -4,6 +4,7 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const fs = require('fs');
 const { getChatResponse } = require('./src/services/groqService');
 const { transcribirAudio } = require('./src/services/transcriptionService');
+const { getNumberContact } = require('./src/helpers/getNumberContact');
 
 // Configuración del cliente
 const client = new Client({
@@ -42,19 +43,23 @@ client.on('message', async (message) => {
 
     if (message.from === 'status@broadcast') return;
 
-    const NUMERO_ADMIN = '140278446997512@lid';
+    const NUMEROS_ADMINS = [
+        '140278446997512@lid',  // Tu admin original
+        '5491123456789@c.us',   // <--- Agrega otro número aquí
+        '5492610000000@c.us'    // <--- Agrega otro número aquí
+    ];
 
-    let numeroRealDelCliente = "";
-    try {
-        const contact = await message.getContact();
-        numeroRealDelCliente = contact.number;
-    } catch (err) {
-        numeroRealDelCliente = message.from.replace(/[^0-9]/g, '');
-    }
+
+    const numeroRealDelCliente = await getNumberContact(message);
+
+
     const chatId = message.from;
 
+    console.log(chatId);
+    
+
     // --- ZONA ADMIN ---
-    if (message.from === NUMERO_ADMIN) {
+    if (NUMEROS_ADMINS.includes(message.from)) {
         if (message.body.startsWith('!off ')) {
             let n = message.body.split(' ')[1]?.replace(/[^0-9]/g, '');
             if (n && n.length > 4) { pausados.add(n); await message.reply(`🛑 Pausado: ${n}`); }
@@ -97,6 +102,7 @@ client.on('message', async (message) => {
     // --- PROCESAR MENSAJE ---
     let mensajeUsuario = message.body;
     if (message.hasMedia && (message.type === 'audio' || message.type === 'ptt')) {
+
         try {
             const media = await message.downloadMedia();
             const t = await transcribirAudio(media);
