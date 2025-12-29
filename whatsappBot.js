@@ -57,6 +57,8 @@ client.on('message', async (message) => {
     const chatId = message.from;
 
     console.log(chatId);
+    console.log(numeroRealDelCliente);
+    
     
 
     // --- ZONA ADMIN ---
