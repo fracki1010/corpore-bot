@@ -49,10 +49,7 @@ client.on('message', async (message) => {
         // 1. Obtenemos el contacto (ahora funcionará tras la actualización)
         const contact = await message.getContact();
 
-        console.log(contact.id._serialized);
         console.log("user", contact.id.user);
-
-
 
         // A partir de aquí usa 'idCompleto' para tus comparaciones de pausados/bloqueados
 
@@ -64,7 +61,7 @@ client.on('message', async (message) => {
     // 1. OBTENEMOS EL NÚMERO LIMPIO DE QUIEN ESCRIBE
     // Esto convierte el ID raro de WhatsApp en "5492622522358"
     // 1. IMPORTANTE: Ahora usamos AWAIT porque el helper es asíncrono
-    const numeroClienteLimpio = normalizeNumber(message);
+    const numeroClienteLimpio = await normalizeNumber(message);
     const chatId = message.from;
 
     // Log para que veas en Linux cómo se traduce el @lid a número real
