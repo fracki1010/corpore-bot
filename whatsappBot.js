@@ -45,18 +45,20 @@ client.on('ready', () => console.log('✅ Bot Conectado'));
 client.on('message', async (message) => {
     if (message.from === 'status@broadcast') return;
 
-
-    try {
+try {
+        // 1. Obtenemos el contacto (ahora funcionará tras la actualización)
         const contact = await message.getContact();
         
-        const id =  contact.id.user
+        // 2. Extraemos el número real (user) y el ID completo (_serialized)
+        const numeroReal = contact.id.user; // Ej: 549261...
+        const idCompleto = contact.id._serialized; // Ej: 549261...@c.us
 
-        console.log(id);
-        
+        console.log(`[CONTACTO] ID Real: ${idCompleto} | Número: ${numeroReal}`);
+
+        // A partir de aquí usa 'idCompleto' para tus comparaciones de pausados/bloqueados
         
     } catch (error) {
-        console.error(error);
-        
+        console.error("Error al obtener contacto:", error);
     }
 
 
