@@ -49,7 +49,7 @@ client.on('message', async (message) => {
         // 1. Obtenemos el contacto (ahora funcionará tras la actualización)
         const contact = await message.getContact();
 
-       console.log(contact.number);
+       console.log(contact.id._serialized);
        
 
         // A partir de aquí usa 'idCompleto' para tus comparaciones de pausados/bloqueados
