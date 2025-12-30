@@ -42,28 +42,42 @@ client.on('ready', () => console.log('✅ Bot Conectado'));
 client.on('message', async (message) => {
     if (message.from === 'status@broadcast') return;
 
+    // 1. Normalizar el número que entra
     const numeroRealDelCliente = await getNumberContact(message);
     const chatId = message.from;
 
     // --- ZONA ADMIN ---
     if (NUMEROS_ADMINS.includes(message.from)) {
+        
         if (message.body.startsWith('!off ')) {
-            let n = normalizarAdminInput(message.body.split(' ')[1]);
+            const raw = message.body.split(' ')[1];
+            const n = await getNumberContact(raw);
             pausados.add(n);
+            
+            console.log(`[SISTEMA] Agregado a pausados: ${n}`);
+            console.log(`[SISTEMA] Lista completa actual:`, Array.from(pausados));
+            
             await message.reply(`🛑 Bot PAUSADO para: ${n}`);
             return;
         }
+
         if (message.body.startsWith('!on ')) {
-            let n = normalizarAdminInput(message.body.split(' ')[1]);
+            const raw = message.body.split(' ')[1];
+            const n = await getNumberContact(raw);
             pausados.delete(n);
-            delete esperandoNombre[chatId];
-            await message.reply(`✅ Bot REACTIVADO para: ${n}`);
+            console.log(`[SISTEMA] Eliminado de pausados: ${n}`);
+            await message.reply(`✅ Bot ACTIVADO para: ${n}`);
             return;
         }
     }
 
-    // --- VERIFICACIÓN DE PAUSA ---
-    if (pausados.has(numeroRealDelCliente)) return;
+    // --- VERIFICACIÓN CRÍTICA (DEBUG) ---
+    console.log(`[CHECK] ¿Está ${numeroRealDelCliente} en la lista? ${pausados.has(numeroRealDelCliente)}`);
+
+    if (pausados.has(numeroRealDelCliente)) {
+        console.log(`[BLOQUEADO] El bot NO responderá a ${numeroRealDelCliente}`);
+        return; // Detiene el código aquí
+    }
 
     // --- RECIBIR NOMBRE ---
     if (esperandoNombre[chatId]) {
