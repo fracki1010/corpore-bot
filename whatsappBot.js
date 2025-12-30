@@ -49,15 +49,22 @@ client.on('message', async (message) => {
     // --- ZONA ADMIN ---
     if (NUMEROS_ADMINS.includes(message.from)) {
         
+        // 1. COMANDO POR RESPUESTA (Más fácil y seguro)
+        // Simplemente responde a un mensaje del cliente con "!off"
+        if (message.body === '!off' && message.hasQuotedMsg) {
+            const quotedMsg = await message.getQuotedMessage();
+            const n = await getNumberContact(quotedMsg);
+            pausados.add(n);
+            await message.reply(`🛑 Pausado por ID: ${n}`);
+            return;
+        }
+
+        // 2. COMANDO MANUAL (El que ya tenías)
         if (message.body.startsWith('!off ')) {
             const raw = message.body.split(' ')[1];
             const n = await getNumberContact(raw);
             pausados.add(n);
-            
-            console.log(`[SISTEMA] Agregado a pausados: ${n}`);
-            console.log(`[SISTEMA] Lista completa actual:`, Array.from(pausados));
-            
-            await message.reply(`🛑 Bot PAUSADO para: ${n}`);
+            await message.reply(`🛑 Pausado manual: ${n}`);
             return;
         }
 
