@@ -109,14 +109,6 @@ client.on('message', async (message) => {
 
 
 
-    if (usuarioPausado) {
-        console.log(`[FILTRO] ${numeroClienteLimpio} está pausado. Ignorando.`);
-        // Opcional: Podrías usar usuarioPausado.number si necesitas el dato original
-        return;
-    }
-
-
-
 
     // --- RECIBIR NOMBRE ---
     if (esperandoNombre[chatId]) {
