@@ -7,10 +7,18 @@ const { getNumberContact } = require('./src/helpers/getNumberContact');
 const { normalizeNumber } = require('./src/helpers/normalizedNumber');
 
 const client = new Client({
-    authStrategy: new LocalAuth(),
+     authStrategy: new LocalAuth(),
     puppeteer: {
         executablePath: '/usr/bin/google-chrome-stable',
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu'
+        ],
     }
 });
 
@@ -38,7 +46,7 @@ client.on('message', async (message) => {
 
     // 1. OBTENEMOS EL NÚMERO LIMPIO DE QUIEN ESCRIBE
     // Esto convierte el ID raro de WhatsApp en "5492622522358"
-    const numeroClienteLimpio = normalizeNumber(message);
+    const numeroClienteLimpio = await normalizeNumber(message);
     const chatId = message.from; // Usamos esto solo para responder (reply)
 
     // --- ZONA ADMIN ---
@@ -83,14 +91,12 @@ client.on('message', async (message) => {
 
     // --- VERIFICACIÓN DE PAUSA (COMPARACIÓN CORRECTA) ---
     // Aquí comparamos "Peras con Peras" (Número Limpio vs Número Limpio en lista)
+    console.log(numeroClienteLimpio);
+    
     if (pausados.has(numeroClienteLimpio)) {
         console.log(`[SILENCIO] Mensaje ignorado de: ${numeroClienteLimpio}`);
         return; 
     }
-
-
-
-
 
 
 
