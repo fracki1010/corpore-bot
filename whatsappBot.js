@@ -5,6 +5,7 @@ const { getChatResponse } = require('./src/services/groqService');
 const { transcribirAudio } = require('./src/services/transcriptionService');
 const { getNumberContact } = require('./src/helpers/getNumberContact');
 const { normalizeNumber } = require('./src/helpers/normalizedNumber');
+const { obtenerIdDeNumero } = require('./src/helpers/getIdFromNumber');
 
 const client = new Client({
     authStrategy: new LocalAuth(),
@@ -45,10 +46,11 @@ client.on('message', async (message) => {
     if (message.from === 'status@broadcast') return;
     
 
+
     // 1. OBTENEMOS EL NÚMERO LIMPIO DE QUIEN ESCRIBE
     // Esto convierte el ID raro de WhatsApp en "5492622522358"
     // 1. IMPORTANTE: Ahora usamos AWAIT porque el helper es asíncrono
-    const numeroClienteLimpio = await normalizeNumber(message);
+    const numeroClienteLimpio = normalizeNumber(message);
     const chatId = message.from;
 
     // Log para que veas en Linux cómo se traduce el @lid a número real
@@ -59,11 +61,21 @@ client.on('message', async (message) => {
     if (NUMEROS_ADMINS.includes(message.from)) {
 
         if (message.body.startsWith('!off ')) {
+
+            
             const inputAdmin = message.body.split(' ')[1];
             if (!inputAdmin) return;
+            
 
+            
+            const number = obtenerIdDeNumero(inputAdmin);
+            if (!number) return;
+            console.log(number);
+            
+            
+            
             // Obtenemos el ID normalizado para comparaciones futuras
-            const numeroAPausar = await normalizeNumber(inputAdmin);
+            const numeroAPausar = normalizeNumber(inputAdmin);
 
             // Verificamos si ya existe para no duplicarlo
             const yaExiste = pausados.some(p => p.whatsappId === numeroAPausar);
@@ -86,7 +98,7 @@ client.on('message', async (message) => {
             const inputAdmin = message.body.split(' ')[1];
             if (!inputAdmin) return;
 
-            const numeroAActivar = await normalizeNumber(inputAdmin);
+            const numeroAActivar =  normalizeNumber(inputAdmin);
 
             // ELIMINAMOS DEL ARRAY (Filtramos todos MENOS el que queremos sacar)
             const longitudAnterior = pausados.length;
