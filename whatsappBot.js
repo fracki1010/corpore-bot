@@ -56,7 +56,7 @@ client.on('message', async (message) => {
         contact: {
             number: contact.number, // <--- ESTE ES EL NÚMERO QUE USAMOS PARA PAUSAR
             name: contact.name,
-            isMyContact: contact.isMyContact
+            isMyContact: contact.isMyContact()
         }
     };
 
