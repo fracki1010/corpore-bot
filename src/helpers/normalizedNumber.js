@@ -1,47 +1,18 @@
-/**
- * Extrae y normaliza el número a formato 549XXXXXXXXXX
- * @param {string|object} input - Puede ser el objeto message o un string (número)
- */
-const normalizeNumber = (input) => {
-    let rawNumber = '';
 
-    // CASO 1: Es el objeto Mensaje de WhatsApp
-    if (typeof input === 'object' && input.from) {
-        // Extraemos lo que está antes del @ (ej: 549261555000@c.us -> 549261555000)
-        rawNumber = input.from.split('@')[0];
-    } 
-    // CASO 2: Es un string (ej: lo que escribe el admin en !off)
-    else {
-        rawNumber = String(input);
+const normalizeNumber = async (message) => {
+
+    try {
+        
+        // 1. Obtenemos el contacto (ahora funcionará tras la actualización)
+        const contact = await message.getContact(); 
+
+       console.log("user",contact.id.user);
+
+       return contact.id.user
+
+    } catch (error) {
+        console.error(error);
     }
-
-    // Limpieza básica: dejar solo números
-    let clean = rawNumber.replace(/\D/g, '');
-
-    // --- LÓGICA DE NORMALIZACIÓN ARGENTINA (549) ---
-
-    // 1. Quitamos el '0' inicial si existe (ej: 0261 -> 261)
-    if (clean.startsWith('0')) clean = clean.slice(1);
-
-    // 2. Quitamos el '15' inicial si existe (ej: 155... -> 5...)
-    if (clean.startsWith('15')) clean = clean.slice(2);
-
-    // 3. Si ya tiene el 549 al principio, está perfecto.
-    if (clean.startsWith('549')) {
-        return clean;
-    }
-
-    // 4. Si tiene 54 pero le falta el 9 (ej: 54261...)
-    if (clean.startsWith('54') && clean.charAt(2) !== '9') {
-        return '549' + clean.slice(2);
-    }
-
-    // 5. Si no tiene ni 54 (es un numero local, ej: 261...), le agregamos 549
-    if (!clean.startsWith('54')) {
-        return '549' + clean;
-    }
-
-    return clean;
 };
 
 module.exports = { normalizeNumber };

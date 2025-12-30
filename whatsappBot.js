@@ -25,7 +25,7 @@ const client = new Client({
 
 // --- VARIABLES ---
 const historiales = {};
-let pausados = [];
+const pausados = new Set();
 const esperandoNombre = {};
 
 const NUMEROS_ADMINS = [
@@ -47,12 +47,12 @@ client.on('message', async (message) => {
 
     try {
         // 1. Obtenemos el contacto (ahora funcionará tras la actualización)
-        const contact = await message.getContact(); 
+        const contact = await message.getContact();
 
-       console.log(contact.id._serialized);
-       console.log("user",contact.id.user);
-       
-       
+        console.log(contact.id._serialized);
+        console.log("user", contact.id.user);
+
+
 
         // A partir de aquí usa 'idCompleto' para tus comparaciones de pausados/bloqueados
 
@@ -71,67 +71,43 @@ client.on('message', async (message) => {
     console.log(`[LOG] ID Original: ${chatId} | Número Real: ${numeroClienteLimpio}`);
 
     // --- ZONA ADMIN ---
-    // --- ZONA ADMIN ---
     if (NUMEROS_ADMINS.includes(message.from)) {
 
+        // COMANDO: !off NUMERO (Pausar bot para un cliente)
         if (message.body.startsWith('!off ')) {
+            let targetNumber = message.body.split(' ')[1]; // El número que escribas después de !off
+            if (!targetNumber) return;
 
-
-            const inputAdmin = message.body.split(' ')[1];
-            if (!inputAdmin) return;
-
-
-
-            const number = await obtenerIdDeNumero(inputAdmin, client);
-            if (!number) return;
-            console.log(number);
-
-
-
-            // Obtenemos el ID normalizado para comparaciones futuras
-            const numeroAPausar = normalizeNumber(inputAdmin);
-
-            // Verificamos si ya existe para no duplicarlo
-            const yaExiste = pausados.some(p => p.whatsappId === numeroAPausar);
-
-            if (!yaExiste) {
-                // AGREGAMOS EL OBJETO AL ARRAY
-                pausados.push({
-                    number: inputAdmin,       // El número que escribió el admin
-                    whatsappId: numeroAPausar // El ID normalizado (ej: 549...)
-                });
-                console.log(`[SISTEMA] Pausado: ${numeroAPausar}`);
-                await message.reply(`🛑 Pausado: ${numeroAPausar}`);
-            } else {
-                await message.reply(`⚠️ El usuario ${numeroAPausar} ya estaba pausado.`);
-            }
+            pausados.add(targetNumber);
+            await message.reply(`🛑 Bot PAUSADO para ${targetNumber}. Ya puedes hablar manualmente.`);
             return;
         }
 
+        // COMANDO: !on NUMERO (Reactivar bot)
         if (message.body.startsWith('!on ')) {
-            const inputAdmin = message.body.split(' ')[1];
-            if (!inputAdmin) return;
+            let targetNumber = message.body.split(' ')[1];
+            if (!targetNumber) return;
 
-            const numeroAActivar = normalizeNumber(inputAdmin);
-
-            // ELIMINAMOS DEL ARRAY (Filtramos todos MENOS el que queremos sacar)
-            const longitudAnterior = pausados.length;
-            pausados = pausados.filter(p => p.whatsappId !== numeroAActivar);
-
-            if (pausados.length < longitudAnterior) {
-                await message.reply(`✅ Reactivado: ${numeroAActivar}`);
-            } else {
-                await message.reply(`⚠️ No encontré a ${numeroAActivar} en la lista de pausados.`);
-            }
+            pausados.delete(targetNumber);
+            // Opcional: Borrar memoria para empezar fresco
+            delete historiales[targetNumber];
+            await message.reply(`✅ Bot REACTIVADO para ${targetNumber}.`);
             return;
         }
     }
 
 
 
-    // --- VERIFICACIÓN DE PAUSA ---
-    // Buscamos si existe algún objeto cuyo whatsappId sea igual al del cliente actual
-    const usuarioPausado = pausados.find(p => p.whatsappId === numeroClienteLimpio);
+    // =============================================
+    // 🚦 CHECK DE PAUSA (MODO HUMANO)
+    // =============================================
+    // Si el número está en la lista de pausados, el bot IGNORA el mensaje y no hace nada.
+    if (pausados.has(numeroClienteLimpio)) {
+        console.log(`🙊 Chat pausado para ${message.from}. Esperando a humano...`);
+        return;
+    }
+
+
 
     if (usuarioPausado) {
         console.log(`[FILTRO] ${numeroClienteLimpio} está pausado. Ignorando.`);
@@ -154,14 +130,11 @@ client.on('message', async (message) => {
         await message.reply(`¡Gracias ${nombreCliente}! Ya le avisé al equipo.`);
 
         // Agregamos a la lista de pausados automáticamente
-        const yaExiste = pausados.some(p => p.whatsappId === numeroRealDelCliente);
-        if (!yaExiste) {
-            pausados.push({
-                number: numeroRealDelCliente,
-                whatsappId: numeroRealDelCliente
-            });
-            console.log(`[SISTEMA] Pausado automáticamente: ${numeroRealDelCliente}`);
-        }
+
+        pausados.add(
+            numeroClienteLimpio);
+        console.log(`[SISTEMA] Pausado automáticamente: ${numeroClienteLimpio}`);
+
 
         delete esperandoNombre[chatId];
         return;
