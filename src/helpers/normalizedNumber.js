@@ -5,6 +5,9 @@
 
 async function normalizeNumber(message) {
 
+    console.log(message.from);
+    
+
    let numeroReal;
     try {
         // 1. Intentamos obtener el objeto de contacto
