@@ -7,7 +7,7 @@ const { getNumberContact } = require('./src/helpers/getNumberContact');
 const { normalizeNumber } = require('./src/helpers/normalizedNumber');
 
 const client = new Client({
-     authStrategy: new LocalAuth(),
+    authStrategy: new LocalAuth(),
     puppeteer: {
         executablePath: '/usr/bin/google-chrome-stable',
         args: [
@@ -46,56 +46,54 @@ client.on('message', async (message) => {
 
     // 1. OBTENEMOS EL NÚMERO LIMPIO DE QUIEN ESCRIBE
     // Esto convierte el ID raro de WhatsApp en "5492622522358"
+    // 1. IMPORTANTE: Ahora usamos AWAIT porque el helper es asíncrono
     const numeroClienteLimpio = await normalizeNumber(message);
-    const chatId = message.from; // Usamos esto solo para responder (reply)
+    const chatId = message.from;
+
+    // Log para que veas en Linux cómo se traduce el @lid a número real
+    console.log(`[LOG] ID Original: ${chatId} | Número Real: ${numeroClienteLimpio}`);
 
     // --- ZONA ADMIN ---
     if (NUMEROS_ADMINS.includes(message.from)) {
-        
-        // COMANDO: !off 2622522358
+
         if (message.body.startsWith('!off ')) {
             const inputAdmin = message.body.split(' ')[1];
             if (!inputAdmin) return;
 
-            // Normalizamos lo que escribió el admin al mismo formato
-            const numeroAPausar = normalizeNumber(inputAdmin);
-
+            // También usamos await aquí para estandarizar
+            const numeroAPausar = await normalizeNumber(inputAdmin);
             pausados.add(numeroAPausar);
-            
-            console.log(`[ADMIN] Pausado: ${numeroAPausar}`);
-            console.log(`[DEBUG] Lista actual:`, Array.from(pausados));
-            
-            await message.reply(`🛑 Pausado exitosamente: ${numeroAPausar}`);
+
+            console.log(`[SISTEMA] Pausado: ${numeroAPausar}`);
+            await message.reply(`🛑 Pausado: ${numeroAPausar}`);
             return;
         }
 
-        // COMANDO: !on 2622522358
         if (message.body.startsWith('!on ')) {
             const inputAdmin = message.body.split(' ')[1];
             if (!inputAdmin) return;
 
-            const numeroAActivar = normalizeNumber(inputAdmin);
-            
+            const numeroAActivar = await normalizeNumber(inputAdmin);
             pausados.delete(numeroAActivar);
-            // También borramos historiales y estados de espera
-            delete esperandoNombre[chatId]; 
-            // Limpieza profunda de historial buscando ese numero
-            Object.keys(historiales).forEach(k => { 
-                if (k.includes(numeroAActivar)) delete historiales[k]; 
-            });
 
             await message.reply(`✅ Reactivado: ${numeroAActivar}`);
             return;
         }
     }
 
+    // --- VERIFICACIÓN DE PAUSA ---
+    if (pausados.has(numeroClienteLimpio)) {
+        console.log(`[FILTRO] ${numeroClienteLimpio} está pausado. Ignorando.`);
+        return;
+    }
+
     // --- VERIFICACIÓN DE PAUSA (COMPARACIÓN CORRECTA) ---
     // Aquí comparamos "Peras con Peras" (Número Limpio vs Número Limpio en lista)
     console.log(numeroClienteLimpio);
-    
+
     if (pausados.has(numeroClienteLimpio)) {
         console.log(`[SILENCIO] Mensaje ignorado de: ${numeroClienteLimpio}`);
-        return; 
+        return;
     }
 
 
