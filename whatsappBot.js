@@ -45,6 +45,30 @@ client.on('ready', () => console.log('✅ Bot Conectado'));
 client.on('message', async (message) => {
     if (message.from === 'status@broadcast') return;
     
+    async function obtenerCusDesdeLid(lid) {
+    try {
+        // 1. Buscamos el contacto usando el LID
+        const contacto = await client.getContactById(lid);
+        
+        if (!contacto) return null;
+
+        // 2. La librería ya resuelve internamente el número real
+        const numeroReal = contacto.number; // Ej: "549261..."
+
+        // 3. Construimos el ID de usuario (@c.us)
+        // Esta es la forma estándar: número + @c.us
+        const cusId = `${numeroReal}@c.us`;
+
+        // return cusId;
+        console.log(cusId);
+        
+    } catch (error) {
+        console.error("Error convirtiendo LID a CUS:", error);
+        return null;
+    }
+}
+
+obtenerCusDesdeLid(message.from)
 
 
     // 1. OBTENEMOS EL NÚMERO LIMPIO DE QUIEN ESCRIBE

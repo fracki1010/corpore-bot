@@ -1,17 +1,6 @@
 async function obtenerIdDeNumero(numero, client) {
     try {
-
-
-        const contacto = client.getContact();
-
-        const realId = contacto.id._serialized;
-
-
-        const numeroLimpio = contacto.number;
-
-        console.log(`Mensaje recibido de: ${realId} (Número: ${numeroLimpio})`);
-
-
+        
         // El número debe ser string y sin el símbolo '+' (ej: '549261...')
         const idObj = await client.getNumberId(numero);
 
