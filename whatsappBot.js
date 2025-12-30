@@ -24,7 +24,7 @@ const client = new Client({
 
 // --- VARIABLES ---
 const historiales = {};
-const pausados = new Set();
+let pausados = [];
 const esperandoNombre = {};
 
 const NUMEROS_ADMINS = [
@@ -45,38 +45,6 @@ client.on('message', async (message) => {
     if (message.from === 'status@broadcast') return;
     
 
-   let numeroReal;
-
-try {
-    // 1. Intentamos obtener el objeto de contacto
-    const contacto = await message.getContact();
-    
-    // 2. Si existe, obtenemos el número con formato (+54 9 ...)
-    numeroReal = await contacto.getFormattedNumber();
-    
-} catch (error) {
-    // 3. Si algo falla (ej: es un grupo o error de conexión), 
-    // usamos el ID del mensaje limpiando los caracteres no numéricos
-    numeroReal = message.from.replace(/[^0-9]/g, '');
-}
-
-console.log("Número obtenido:", numeroReal);
-
-    // JSON del mensaje para ver en consola (Sin getContact para evitar el error)
-    const debugLog = {
-        from: message.from,
-        body: message.body,
-        type: message.type,
-        // number: numeroReal,
-        _data: {
-            notifyName: message._data?.notifyName,
-            id: message.id.id
-        }
-    };
-
-    console.log("---------- MENSAJE ENTRANTE ----------");
-    console.log(JSON.stringify(debugLog, null, 2));
-
     // 1. OBTENEMOS EL NÚMERO LIMPIO DE QUIEN ESCRIBE
     // Esto convierte el ID raro de WhatsApp en "5492622522358"
     // 1. IMPORTANTE: Ahora usamos AWAIT porque el helper es asíncrono
@@ -87,18 +55,30 @@ console.log("Número obtenido:", numeroReal);
     console.log(`[LOG] ID Original: ${chatId} | Número Real: ${numeroClienteLimpio}`);
 
     // --- ZONA ADMIN ---
+    // --- ZONA ADMIN ---
     if (NUMEROS_ADMINS.includes(message.from)) {
 
         if (message.body.startsWith('!off ')) {
             const inputAdmin = message.body.split(' ')[1];
             if (!inputAdmin) return;
 
-            // También usamos await aquí para estandarizar
+            // Obtenemos el ID normalizado para comparaciones futuras
             const numeroAPausar = await normalizeNumber(inputAdmin);
-            pausados.add(numeroAPausar);
 
-            console.log(`[SISTEMA] Pausado: ${numeroAPausar}`);
-            await message.reply(`🛑 Pausado: ${numeroAPausar}`);
+            // Verificamos si ya existe para no duplicarlo
+            const yaExiste = pausados.some(p => p.whatsappId === numeroAPausar);
+            
+            if (!yaExiste) {
+                // AGREGAMOS EL OBJETO AL ARRAY
+                pausados.push({
+                    number: inputAdmin,       // El número que escribió el admin
+                    whatsappId: numeroAPausar // El ID normalizado (ej: 549...)
+                });
+                console.log(`[SISTEMA] Pausado: ${numeroAPausar}`);
+                await message.reply(`🛑 Pausado: ${numeroAPausar}`);
+            } else {
+                await message.reply(`⚠️ El usuario ${numeroAPausar} ya estaba pausado.`);
+            }
             return;
         }
 
@@ -107,27 +87,32 @@ console.log("Número obtenido:", numeroReal);
             if (!inputAdmin) return;
 
             const numeroAActivar = await normalizeNumber(inputAdmin);
-            pausados.delete(numeroAActivar);
 
-            await message.reply(`✅ Reactivado: ${numeroAActivar}`);
+            // ELIMINAMOS DEL ARRAY (Filtramos todos MENOS el que queremos sacar)
+            const longitudAnterior = pausados.length;
+            pausados = pausados.filter(p => p.whatsappId !== numeroAActivar);
+
+            if (pausados.length < longitudAnterior) {
+                await message.reply(`✅ Reactivado: ${numeroAActivar}`);
+            } else {
+                await message.reply(`⚠️ No encontré a ${numeroAActivar} en la lista de pausados.`);
+            }
             return;
         }
     }
 
+
+
     // --- VERIFICACIÓN DE PAUSA ---
-    if (pausados.has(numeroClienteLimpio)) {
+    // Buscamos si existe algún objeto cuyo whatsappId sea igual al del cliente actual
+    const usuarioPausado = pausados.find(p => p.whatsappId === numeroClienteLimpio);
+
+    if (usuarioPausado) {
         console.log(`[FILTRO] ${numeroClienteLimpio} está pausado. Ignorando.`);
+        // Opcional: Podrías usar usuarioPausado.number si necesitas el dato original
         return;
     }
 
-    // --- VERIFICACIÓN DE PAUSA (COMPARACIÓN CORRECTA) ---
-    // Aquí comparamos "Peras con Peras" (Número Limpio vs Número Limpio en lista)
-    console.log(numeroClienteLimpio);
-
-    if (pausados.has(numeroClienteLimpio)) {
-        console.log(`[SILENCIO] Mensaje ignorado de: ${numeroClienteLimpio}`);
-        return;
-    }
 
 
 
@@ -142,7 +127,16 @@ console.log("Número obtenido:", numeroReal);
         for (const admin of NUMEROS_ADMINS) { await client.sendMessage(admin, alerta); }
         await message.reply(`¡Gracias ${nombreCliente}! Ya le avisé al equipo.`);
 
-        pausados.add(numeroRealDelCliente);
+        // Agregamos a la lista de pausados automáticamente
+        const yaExiste = pausados.some(p => p.whatsappId === numeroRealDelCliente);
+        if (!yaExiste) {
+            pausados.push({
+                number: numeroRealDelCliente,
+                whatsappId: numeroRealDelCliente
+            });
+            console.log(`[SISTEMA] Pausado automáticamente: ${numeroRealDelCliente}`);
+        }
+       
         delete esperandoNombre[chatId];
         return;
     }
