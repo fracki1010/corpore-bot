@@ -4,7 +4,7 @@ async function obtenerIdDeNumero(numero, client) {
         const idObj = await client.getNumberId(numero);
 
         if (idObj) {
-            return idObj; // Retorna ej: "549261123456@c.us"
+            return idObj._serialized; // Retorna ej: "549261123456@c.us"
         } else {
             console.log("Este número no tiene WhatsApp registrado.");
             return null;
