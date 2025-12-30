@@ -47,9 +47,9 @@ client.on('message', async (message) => {
 
 
     try {
-        const contact = message.getContact();
+        const contact = await message.getContact();
         
-        const id = (await contact).id.user
+        const id =  contact.id.user
 
         console.log(id);
         
