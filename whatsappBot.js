@@ -43,26 +43,21 @@ client.on('ready', () => console.log('✅ Bot Conectado'));
 
 client.on('message', async (message) => {
     if (message.from === 'status@broadcast') return;
+    
 
-    // Obtenemos el contacto para ver la diferencia entre ID y número real
-    const contact = await message.getContact();
-
-    // Creamos un objeto con la info más importante para no saturar la consola
-    const infoMensaje = {
-        from: message.from,        // El ID de WhatsApp (ej: @c.us o @lid)
-        body: message.body,        // El texto que enviaron
-        type: message.type,        // Si es chat, audio, etc.
-        pushname: message._data.notifyName, // Nombre que tiene el usuario en su WA
-        contact: {
-            number: contact.number, // <--- ESTE ES EL NÚMERO QUE USAMOS PARA PAUSAR
-            name: contact.name,
-            isMyContact: contact.isMyContact()
+    // JSON del mensaje para ver en consola (Sin getContact para evitar el error)
+    const debugLog = {
+        from: message.from,
+        body: message.body,
+        type: message.type,
+        _data: {
+            notifyName: message._data?.notifyName,
+            id: message.id.id
         }
     };
 
-    console.log("---------- NUEVO MENSAJE RECIBIDO ----------");
-    console.log(JSON.stringify(infoMensaje, null, 2)); // El '2' es para que se vea con sangría (identado)
-    console.log("--------------------------------------------");
+    console.log("---------- MENSAJE ENTRANTE ----------");
+    console.log(JSON.stringify(debugLog, null, 2));
 
     // 1. OBTENEMOS EL NÚMERO LIMPIO DE QUIEN ESCRIBE
     // Esto convierte el ID raro de WhatsApp en "5492622522358"
