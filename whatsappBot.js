@@ -4,6 +4,7 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const { getChatResponse } = require('./src/services/groqService');
 const { transcribirAudio } = require('./src/services/transcriptionService');
 const { getNumberContact } = require('./src/helpers/getNumberContact');
+const { normalizeNumber } = require('./src/helpers/normalizedNumber');
 
 const client = new Client({
     authStrategy: new LocalAuth(),
