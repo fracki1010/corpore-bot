@@ -45,21 +45,29 @@ client.on('message', async (message) => {
     if (message.from === 'status@broadcast') return;
     
 
-    const numeroRealDelCliente = await message.getContact().then().catch(() => {
-        return message.from.replace(/[^0-9]/g, '');
-    });
+   let numeroReal;
 
-    const numeroReal = await numeroRealDelCliente.getFormattedNumber().then().catch(() => {
-        return numeroRealDelCliente;
-    });
+try {
+    // 1. Intentamos obtener el objeto de contacto
+    const contacto = await message.getContact();
+    
+    // 2. Si existe, obtenemos el número con formato (+54 9 ...)
+    numeroReal = await contacto.getFormattedNumber();
+    
+} catch (error) {
+    // 3. Si algo falla (ej: es un grupo o error de conexión), 
+    // usamos el ID del mensaje limpiando los caracteres no numéricos
+    numeroReal = message.from.replace(/[^0-9]/g, '');
+}
 
+console.log("Número obtenido:", numeroReal);
 
     // JSON del mensaje para ver en consola (Sin getContact para evitar el error)
     const debugLog = {
         from: message.from,
         body: message.body,
         type: message.type,
-        number: numeroReal,
+        // number: numeroReal,
         _data: {
             notifyName: message._data?.notifyName,
             id: message.id.id
