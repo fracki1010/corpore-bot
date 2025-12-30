@@ -18,8 +18,8 @@ const historiales = {};
 const pausados = new Set();
 const esperandoNombre = {};
 const NUMEROS_ADMINS = [
-    '140278446997512@lid', 
-    '5492622586046@c.us', 
+    '140278446997512@lid',
+    '5492622586046@c.us',
     '15152795652173@lid'
 ];
 
@@ -47,44 +47,64 @@ client.on('message', async (message) => {
     const chatId = message.from;
 
     // --- ZONA ADMIN ---
+    // --- ZONA ADMIN ---
     if (NUMEROS_ADMINS.includes(message.from)) {
-        
-        // 1. COMANDO POR RESPUESTA (Más fácil y seguro)
-        // Simplemente responde a un mensaje del cliente con "!off"
-        if (message.body === '!off' && message.hasQuotedMsg) {
-            const quotedMsg = await message.getQuotedMessage();
-            const n = await getNumberContact(quotedMsg);
-            pausados.add(n);
-            await message.reply(`🛑 Pausado por ID: ${n}`);
-            return;
-        }
 
-        // 2. COMANDO MANUAL (El que ya tenías)
         if (message.body.startsWith('!off ')) {
-            const raw = message.body.split(' ')[1];
-            const n = await getNumberContact(raw);
-            pausados.add(n);
-            await message.reply(`🛑 Pausado manual: ${n}`);
+            let n = message.body.split(' ')[1]?.replace(/\D/g, '');
+            if (n) {
+                // Generamos el ID exacto que usa WhatsApp
+                // La mayoría son @c.us, si es un @lid el bot lo detectará al recibir
+                const idParaPausar = n.includes('@') ? n : `${n}@c.us`;
+
+                pausados.add(idParaPausar);
+
+                console.log(`[SISTEMA] Pausado ID: ${idParaPausar}`);
+                await message.reply(`🛑 Bot PAUSADO para el ID: ${idParaPausar}`);
+            }
             return;
         }
 
         if (message.body.startsWith('!on ')) {
-            const raw = message.body.split(' ')[1];
-            const n = await getNumberContact(raw);
-            pausados.delete(n);
-            console.log(`[SISTEMA] Eliminado de pausados: ${n}`);
-            await message.reply(`✅ Bot ACTIVADO para: ${n}`);
+            let n = message.body.split(' ')[1]?.replace(/\D/g, '');
+            if (n) {
+                const idParaActivar = n.includes('@') ? n : `${n}@c.us`;
+                pausados.delete(idParaActivar);
+
+                // También intentamos borrar por si era @lid
+                pausados.delete(`${n}@lid`);
+
+                await message.reply(`✅ Bot ACTIVADO para: ${n}`);
+            }
             return;
         }
     }
 
-    // --- VERIFICACIÓN CRÍTICA (DEBUG) ---
     console.log(`[CHECK] ¿Está ${numeroRealDelCliente} en la lista? ${pausados.has(numeroRealDelCliente)}`);
 
-    if (pausados.has(numeroRealDelCliente)) {
-        console.log(`[BLOQUEADO] El bot NO responderá a ${numeroRealDelCliente}`);
-        return; // Detiene el código aquí
+    // --- VERIFICACIÓN DE PAUSA ---
+    // Comparamos directamente contra message.from (que es el ID que envía WhatsApp)
+    if (pausados.has(message.from)) {
+        console.log(`[BLOQUEADO] El ID ${message.from} está en la lista de pausa.`);
+        return;
     }
+
+
+    // --- VERIFICACIÓN DE PAUSA MEJORADA ---
+    const esAdmin = NUMEROS_ADMINS.includes(message.from);
+
+    // Extraemos solo los números de quien escribe para comparar contra los números pausados
+    const soloNumerosEntrante = message.from.replace(/\D/g, '');
+
+    // Comprobamos si el ID completo está pausado O si el número puro está pausado
+    const estaPausado = pausados.has(message.from) ||
+        Array.from(pausados).some(p => p.includes(soloNumerosEntrante));
+
+    if (!esAdmin && estaPausado) {
+        console.log(`[PAUSA] Ignorando mensaje de: ${message.from}`);
+        return;
+    }
+
 
     // --- RECIBIR NOMBRE ---
     if (esperandoNombre[chatId]) {
@@ -96,7 +116,7 @@ client.on('message', async (message) => {
 
         for (const admin of NUMEROS_ADMINS) { await client.sendMessage(admin, alerta); }
         await message.reply(`¡Gracias ${nombreCliente}! Ya le avisé al equipo.`);
-        
+
         pausados.add(numeroRealDelCliente);
         delete esperandoNombre[chatId];
         return;
@@ -136,7 +156,7 @@ client.on('message', async (message) => {
 
 async function iniciarTransferencia(chatId, numeroReal, motivo, origen, messageObj) {
     esperandoNombre[chatId] = { motivo, origen };
-    let msg = origen === 'cierre_venta' 
+    let msg = origen === 'cierre_venta'
         ? "¡Genial! Por favor dime tu **nombre completo** para la inscripción:"
         : "Para derivarte con un asesor, por favor dime tu **nombre completo**:";
     await messageObj.reply(msg);
