@@ -68,7 +68,7 @@ client.on('message', async (message) => {
             
 
             
-            const number = obtenerIdDeNumero(inputAdmin, client);
+            const number = await obtenerIdDeNumero(inputAdmin, client);
             if (!number) return;
             console.log(number);
             
