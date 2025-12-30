@@ -68,7 +68,7 @@ client.on('message', async (message) => {
     }
 }
 
-obtenerCusDesdeLid(message.from)
+    await obtenerCusDesdeLid(message.from)
 
 
     // 1. OBTENEMOS EL NÚMERO LIMPIO DE QUIEN ESCRIBE
