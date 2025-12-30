@@ -17,21 +17,14 @@ const client = new Client({
 const historiales = {};
 const pausados = new Set();
 const esperandoNombre = {};
+
 const NUMEROS_ADMINS = [
     '140278446997512@lid',
     '5492622586046@c.us',
     '15152795652173@lid'
 ];
 
-// Función para normalizar lo que escribes en !on o !off
-function normalizarAdminInput(texto) {
-    let n = texto.replace(/\D/g, '');
-    if (!n.startsWith('549')) {
-        if (n.startsWith('54')) n = '549' + n.slice(2);
-        else n = '549' + n;
-    }
-    return n;
-}
+
 
 client.on('qr', (qr) => {
     console.log('⚠️ QR RECIBIDO: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(qr));
@@ -42,68 +35,62 @@ client.on('ready', () => console.log('✅ Bot Conectado'));
 client.on('message', async (message) => {
     if (message.from === 'status@broadcast') return;
 
-    // 1. Normalizar el número que entra
-    const numeroRealDelCliente = await getNumberContact(message);
-    const chatId = message.from;
+    // 1. OBTENEMOS EL NÚMERO LIMPIO DE QUIEN ESCRIBE
+    // Esto convierte el ID raro de WhatsApp en "5492622522358"
+    const numeroClienteLimpio = normalizeNumber(message);
+    const chatId = message.from; // Usamos esto solo para responder (reply)
 
-    // --- ZONA ADMIN ---
     // --- ZONA ADMIN ---
     if (NUMEROS_ADMINS.includes(message.from)) {
-
+        
+        // COMANDO: !off 2622522358
         if (message.body.startsWith('!off ')) {
-            let n = message.body.split(' ')[1]?.replace(/\D/g, '');
-            if (n) {
-                // Generamos el ID exacto que usa WhatsApp
-                // La mayoría son @c.us, si es un @lid el bot lo detectará al recibir
-                const idParaPausar = n.includes('@') ? n : `${n}@c.us`;
+            const inputAdmin = message.body.split(' ')[1];
+            if (!inputAdmin) return;
 
-                pausados.add(idParaPausar);
+            // Normalizamos lo que escribió el admin al mismo formato
+            const numeroAPausar = normalizeNumber(inputAdmin);
 
-                console.log(`[SISTEMA] Pausado ID: ${idParaPausar}`);
-                await message.reply(`🛑 Bot PAUSADO para el ID: ${idParaPausar}`);
-            }
+            pausados.add(numeroAPausar);
+            
+            console.log(`[ADMIN] Pausado: ${numeroAPausar}`);
+            console.log(`[DEBUG] Lista actual:`, Array.from(pausados));
+            
+            await message.reply(`🛑 Pausado exitosamente: ${numeroAPausar}`);
             return;
         }
 
+        // COMANDO: !on 2622522358
         if (message.body.startsWith('!on ')) {
-            let n = message.body.split(' ')[1]?.replace(/\D/g, '');
-            if (n) {
-                const idParaActivar = n.includes('@') ? n : `${n}@c.us`;
-                pausados.delete(idParaActivar);
+            const inputAdmin = message.body.split(' ')[1];
+            if (!inputAdmin) return;
 
-                // También intentamos borrar por si era @lid
-                pausados.delete(`${n}@lid`);
+            const numeroAActivar = normalizeNumber(inputAdmin);
+            
+            pausados.delete(numeroAActivar);
+            // También borramos historiales y estados de espera
+            delete esperandoNombre[chatId]; 
+            // Limpieza profunda de historial buscando ese numero
+            Object.keys(historiales).forEach(k => { 
+                if (k.includes(numeroAActivar)) delete historiales[k]; 
+            });
 
-                await message.reply(`✅ Bot ACTIVADO para: ${n}`);
-            }
+            await message.reply(`✅ Reactivado: ${numeroAActivar}`);
             return;
         }
     }
 
-    console.log(`[CHECK] ¿Está ${numeroRealDelCliente} en la lista? ${pausados.has(numeroRealDelCliente)}`);
-
-    // --- VERIFICACIÓN DE PAUSA ---
-    // Comparamos directamente contra message.from (que es el ID que envía WhatsApp)
-    if (pausados.has(message.from)) {
-        console.log(`[BLOQUEADO] El ID ${message.from} está en la lista de pausa.`);
-        return;
+    // --- VERIFICACIÓN DE PAUSA (COMPARACIÓN CORRECTA) ---
+    // Aquí comparamos "Peras con Peras" (Número Limpio vs Número Limpio en lista)
+    if (pausados.has(numeroClienteLimpio)) {
+        console.log(`[SILENCIO] Mensaje ignorado de: ${numeroClienteLimpio}`);
+        return; 
     }
 
 
-    // --- VERIFICACIÓN DE PAUSA MEJORADA ---
-    const esAdmin = NUMEROS_ADMINS.includes(message.from);
 
-    // Extraemos solo los números de quien escribe para comparar contra los números pausados
-    const soloNumerosEntrante = message.from.replace(/\D/g, '');
 
-    // Comprobamos si el ID completo está pausado O si el número puro está pausado
-    const estaPausado = pausados.has(message.from) ||
-        Array.from(pausados).some(p => p.includes(soloNumerosEntrante));
 
-    if (!esAdmin && estaPausado) {
-        console.log(`[PAUSA] Ignorando mensaje de: ${message.from}`);
-        return;
-    }
 
 
     // --- RECIBIR NOMBRE ---
