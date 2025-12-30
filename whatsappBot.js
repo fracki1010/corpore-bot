@@ -47,7 +47,7 @@ client.on('message', async (message) => {
 
     try {
         // 1. Obtenemos el contacto (ahora funcionará tras la actualización)
-        const contact = await message.getContact();
+        const contact = await message.getContact(); 
 
        console.log(contact.id._serialized);
        
