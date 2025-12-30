@@ -50,6 +50,7 @@ client.on('message', async (message) => {
         from: message.from,
         body: message.body,
         type: message.type,
+        number: message.number,
         _data: {
             notifyName: message._data?.notifyName,
             id: message.id.id
