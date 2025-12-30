@@ -96,6 +96,8 @@ client.on('message', async (message) => {
         }
     }
 
+    console.log(pausados);
+    
 
 
     // =============================================
