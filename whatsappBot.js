@@ -50,6 +50,8 @@ client.on('message', async (message) => {
         const contact = await message.getContact(); 
 
        console.log(contact.id._serialized);
+       console.log("user",contact.id.user);
+       
        
 
         // A partir de aquí usa 'idCompleto' para tus comparaciones de pausados/bloqueados
