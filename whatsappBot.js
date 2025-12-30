@@ -48,9 +48,14 @@ client.on('message', async (message) => {
 
     try {
         const contact = message.getContact();
-        console.log(JSON.stringify(contact));
+        
+        const id = (await contact).id.user
+
+        console.log(id);
+        
         
     } catch (error) {
+        console.error(error);
         
     }
 
