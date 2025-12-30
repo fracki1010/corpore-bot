@@ -49,7 +49,7 @@ client.on('message', async (message) => {
         return message.from.replace(/[^0-9]/g, '');
     });
 
-    const numeroReal = numeroRealDelCliente.getFormattedNumber(numeroRealDelCliente.number)
+    const numeroReal = await numeroRealDelCliente.getFormattedNumber(numeroRealDelCliente.number)
 
 
     // JSON del mensaje para ver en consola (Sin getContact para evitar el error)
