@@ -61,7 +61,7 @@ client.on('message', async (message) => {
     // 1. OBTENEMOS EL NÚMERO LIMPIO DE QUIEN ESCRIBE
     // Esto convierte el ID raro de WhatsApp en "5492622522358"
     // 1. IMPORTANTE: Ahora usamos AWAIT porque el helper es asíncrono
-    const numeroClienteLimpio = await normalizeNumber(message);
+    const numeroClienteLimpio = await getNumberContact(message);
     const chatId = message.from;
 
     // Log para que veas en Linux cómo se traduce el @lid a número real
@@ -75,6 +75,8 @@ client.on('message', async (message) => {
             let targetNumber = message.body.split(' ')[1]; // El número que escribas después de !off
             if (!targetNumber) return;
 
+            targetNumber = normalizeNumber(targetNumber);
+
             pausados.add(targetNumber);
             await message.reply(`🛑 Bot PAUSADO para ${targetNumber}. Ya puedes hablar manualmente.`);
             return;
@@ -84,6 +86,8 @@ client.on('message', async (message) => {
         if (message.body.startsWith('!on ')) {
             let targetNumber = message.body.split(' ')[1];
             if (!targetNumber) return;
+
+            targetNumber = normalizeNumber(targetNumber)
 
             pausados.delete(targetNumber);
             // Opcional: Borrar memoria para empezar fresco
