@@ -45,7 +45,11 @@ client.on('message', async (message) => {
     if (message.from === 'status@broadcast') return;
     
 
-    const numeroRealDelCliente = await message.getContact().then(contact => contact.getFormattedNumber())
+    const numeroRealDelCliente = await message.getContact().then().catch(() => {
+        return message.from.replace(/[^0-9]/g, '');
+    });
+
+    const numeroReal = numeroRealDelCliente.getFormattedNumber(numeroRealDelCliente.number)
 
 
     // JSON del mensaje para ver en consola (Sin getContact para evitar el error)
@@ -53,7 +57,7 @@ client.on('message', async (message) => {
         from: message.from,
         body: message.body,
         type: message.type,
-        number: numeroRealDelCliente,
+        number: numeroReal,
         _data: {
             notifyName: message._data?.notifyName,
             id: message.id.id
