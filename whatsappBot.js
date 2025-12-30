@@ -45,18 +45,15 @@ client.on('ready', () => console.log('✅ Bot Conectado'));
 client.on('message', async (message) => {
     if (message.from === 'status@broadcast') return;
 
-try {
+    try {
         // 1. Obtenemos el contacto (ahora funcionará tras la actualización)
         const contact = await message.getContact();
-        
-        // 2. Extraemos el número real (user) y el ID completo (_serialized)
-        const numeroReal = contact.id.user; // Ej: 549261...
-        const idCompleto = contact.id._serialized; // Ej: 549261...@c.us
 
-        console.log(`[CONTACTO] ID Real: ${idCompleto} | Número: ${numeroReal}`);
+       console.log(contact.number);
+       
 
         // A partir de aquí usa 'idCompleto' para tus comparaciones de pausados/bloqueados
-        
+
     } catch (error) {
         console.error("Error al obtener contacto:", error);
     }
@@ -77,24 +74,24 @@ try {
 
         if (message.body.startsWith('!off ')) {
 
-            
+
             const inputAdmin = message.body.split(' ')[1];
             if (!inputAdmin) return;
-            
 
-            
+
+
             const number = await obtenerIdDeNumero(inputAdmin, client);
             if (!number) return;
             console.log(number);
-            
-            
-            
+
+
+
             // Obtenemos el ID normalizado para comparaciones futuras
             const numeroAPausar = normalizeNumber(inputAdmin);
 
             // Verificamos si ya existe para no duplicarlo
             const yaExiste = pausados.some(p => p.whatsappId === numeroAPausar);
-            
+
             if (!yaExiste) {
                 // AGREGAMOS EL OBJETO AL ARRAY
                 pausados.push({
@@ -113,7 +110,7 @@ try {
             const inputAdmin = message.body.split(' ')[1];
             if (!inputAdmin) return;
 
-            const numeroAActivar =  normalizeNumber(inputAdmin);
+            const numeroAActivar = normalizeNumber(inputAdmin);
 
             // ELIMINAMOS DEL ARRAY (Filtramos todos MENOS el que queremos sacar)
             const longitudAnterior = pausados.length;
@@ -163,7 +160,7 @@ try {
             });
             console.log(`[SISTEMA] Pausado automáticamente: ${numeroRealDelCliente}`);
         }
-       
+
         delete esperandoNombre[chatId];
         return;
     }
