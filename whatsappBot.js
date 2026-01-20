@@ -98,7 +98,7 @@ client.on('message', async (message) => {
     }
 
     console.log(pausados);
-    
+
 
 
     // =============================================
@@ -155,16 +155,23 @@ client.on('message', async (message) => {
     historiales[chatId].push({ role: "user", content: mensajeUsuario });
 
     try {
+        const chat = await message.getChat();
+        await chat.sendStateTyping();
+
         let botResponse = await getChatResponse(historiales[chatId]);
 
         if (botResponse.includes('[TRANSFERIR_HUMANO]')) {
-            await iniciarTransferencia(chatId, numeroRealDelCliente, "Interés detectado", "cierre_venta", message);
+            await iniciarTransferencia(chatId, numeroClienteLimpio, "IA detectó cierre", "cierre_venta", message);
             return;
         }
 
         historiales[chatId].push({ role: "assistant", content: botResponse });
-        await message.reply(botResponse);
-    } catch (e) { 
+
+        // CAMBIO CRÍTICO: Usamos sendMessage con { sendSeen: false } para evitar el crash
+        await client.sendMessage(message.from, botResponse, { sendSeen: false });
+
+        await chat.clearState();
+    } catch (e) {
         console.log("Error IA");
         console.error(e);
     }
@@ -172,10 +179,12 @@ client.on('message', async (message) => {
 
 async function iniciarTransferencia(chatId, numeroReal, motivo, origen, messageObj) {
     esperandoNombre[chatId] = { motivo, origen };
-    let msg = origen === 'cierre_venta'
-        ? "¡Genial! Por favor dime tu **nombre completo** para la inscripción:"
-        : "Para derivarte con un asesor, por favor dime tu **nombre completo**:";
-    await messageObj.reply(msg);
+    let respuestaBot = origen === 'cierre_venta'
+        ? "¡Genial! Para la inscripción, dime tu **nombre completo**:"
+        : "Para derivarte, dime tu **nombre completo**:";
+
+    // USAR SIEMPRE sendSeen: false
+    await client.sendMessage(chatId, respuestaBot, { sendSeen: false });
 }
 
 // API
@@ -185,7 +194,7 @@ app.post('/api/send-message', async (req, res) => {
     const { number, message, apiKey } = req.body;
     if (apiKey !== 'TU_CLAVE_SECRETA_123') return res.status(403).json({ error: 'Key error' });
     const finalId = number.replace(/\D/g, '') + '@c.us';
-    await client.sendMessage(finalId, message,{ sendSeen: false });
+    await client.sendMessage(finalId, message, { sendSeen: false });
     res.json({ success: true });
 });
 app.listen(3000);
