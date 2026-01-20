@@ -164,7 +164,10 @@ client.on('message', async (message) => {
 
         historiales[chatId].push({ role: "assistant", content: botResponse });
         await message.reply(botResponse);
-    } catch (e) { console.log("Error IA"); }
+    } catch (e) { 
+        console.log("Error IA");
+        console.error(e);
+    }
 });
 
 async function iniciarTransferencia(chatId, numeroReal, motivo, origen, messageObj) {
