@@ -5,7 +5,6 @@ const { getChatResponse } = require('./src/services/groqService');
 const { transcribirAudio } = require('./src/services/transcriptionService');
 const { getNumberContact } = require('./src/helpers/getNumberContact');
 const { normalizeNumber } = require('./src/helpers/normalizedNumber');
-const { obtenerIdDeNumero } = require('./src/helpers/getIdFromNumber');
 
 const client = new Client({
     authStrategy: new LocalAuth(),
@@ -23,7 +22,6 @@ const client = new Client({
     }
 });
 
-// --- VARIABLES ---
 const historiales = {};
 const pausados = new Set();
 const esperandoNombre = {};
@@ -34,10 +32,8 @@ const NUMEROS_ADMINS = [
     '15152795652173@lid'
 ];
 
-
-
 client.on('qr', (qr) => {
-    console.log('⚠️ QR RECIBIDO: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(qr));
+    console.log('⚠️ QR: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(qr));
 });
 
 client.on('ready', () => console.log('✅ Bot Conectado'));
@@ -45,73 +41,41 @@ client.on('ready', () => console.log('✅ Bot Conectado'));
 client.on('message', async (message) => {
     if (message.from === 'status@broadcast') return;
 
-    try {
-        // 1. Obtenemos el contacto (ahora funcionará tras la actualización)
-        const contact = await message.getContact();
-
-        console.log("user", contact.id.user);
-
-        // A partir de aquí usa 'idCompleto' para tus comparaciones de pausados/bloqueados
-
-    } catch (error) {
-        console.error("Error al obtener contacto:", error);
-    }
-
-
-    // 1. OBTENEMOS EL NÚMERO LIMPIO DE QUIEN ESCRIBE
-    // Esto convierte el ID raro de WhatsApp en "5492622522358"
-    // 1. IMPORTANTE: Ahora usamos AWAIT porque el helper es asíncrono
+    // 1. OBTENER NÚMERO NORMALIZADO
     const numeroClienteLimpio = await getNumberContact(message);
     const chatId = message.from;
 
-    // Log para que veas en Linux cómo se traduce el @lid a número real
-    console.log(`[LOG] ID Original: ${chatId} | Número Real: ${numeroClienteLimpio}`);
-
     // --- ZONA ADMIN ---
     if (NUMEROS_ADMINS.includes(message.from)) {
-
-        // COMANDO: !off NUMERO (Pausar bot para un cliente)
+        // COMANDO: !off
         if (message.body.startsWith('!off ')) {
-            let targetNumber = message.body.split(' ')[1]; // El número que escribas después de !off
+            let targetNumber = message.body.split(' ')[1];
             if (!targetNumber) return;
-
             targetNumber = normalizeNumber(targetNumber);
-
             pausados.add(targetNumber);
-            await message.reply(`🛑 Bot PAUSADO para ${targetNumber}. Ya puedes hablar manualmente.`);
+            // CORREGIDO: Usar sendMessage con sendSeen: false en lugar de reply
+            await client.sendMessage(chatId, `🛑 Bot PAUSADO para ${targetNumber}.`, { sendSeen: false });
             return;
         }
 
-        // COMANDO: !on NUMERO (Reactivar bot)
+        // COMANDO: !on
         if (message.body.startsWith('!on ')) {
             let targetNumber = message.body.split(' ')[1];
             if (!targetNumber) return;
-
-            targetNumber = normalizeNumber(targetNumber)
-
+            targetNumber = normalizeNumber(targetNumber);
             pausados.delete(targetNumber);
-            // Opcional: Borrar memoria para empezar fresco
-            delete historiales[targetNumber];
-            await message.reply(`✅ Bot REACTIVADO para ${targetNumber}.`);
+            delete historiales[chatId];
+            // CORREGIDO: Usar sendMessage con sendSeen: false
+            await client.sendMessage(chatId, `✅ Bot REACTIVADO para ${targetNumber}.`, { sendSeen: false });
             return;
         }
     }
 
-    console.log(pausados);
-
-
-
-    // =============================================
-    // 🚦 CHECK DE PAUSA (MODO HUMANO)
-    // =============================================
-    // Si el número está en la lista de pausados, el bot IGNORA el mensaje y no hace nada.
+    // --- CHECK DE PAUSA ---
     if (pausados.has(numeroClienteLimpio)) {
-        console.log(`🙊 Chat pausado para ${message.from}. Esperando a humano...`);
+        console.log(`🙊 Chat pausado para ${numeroClienteLimpio}`);
         return;
     }
-
-
-
 
     // --- RECIBIR NOMBRE ---
     if (esperandoNombre[chatId]) {
@@ -119,23 +83,22 @@ client.on('message', async (message) => {
         const { motivo, origen } = esperandoNombre[chatId];
         let titulo = origen === 'cierre_venta' ? '💰 VENTA' : '⚠️ RECLAMO';
 
-        const alerta = `${titulo}\n👤: *${nombreCliente}*\n📱: ${numeroRealDelCliente}\n💬: ${motivo}\n\n🛑 Pausado. (!on ${numeroRealDelCliente} para volver)`;
+        const alerta = `${titulo}\n👤: *${nombreCliente}*\n📱: ${numeroClienteLimpio}\n💬: ${motivo}\n\n🛑 Pausado. (!on ${numeroClienteLimpio} para volver)`;
 
-        for (const admin of NUMEROS_ADMINS) { await client.sendMessage(admin, alerta, { sendSeen: false }); }
-        await message.reply(`¡Gracias ${nombreCliente}! Ya le avisé al equipo.`);
+        for (const admin of NUMEROS_ADMINS) { 
+            // CORREGIDO: Ya tenía sendSeen, mantenemos seguridad
+            await client.sendMessage(admin, alerta, { sendSeen: false }).catch(e => console.log("Error aviso admin")); 
+        }
 
-        // Agregamos a la lista de pausados automáticamente
+        // CORREGIDO: Usar sendMessage en lugar de reply
+        await client.sendMessage(chatId, `¡Gracias ${nombreCliente}! Ya le avisé al equipo.`, { sendSeen: false });
 
-        pausados.add(
-            numeroClienteLimpio);
-        console.log(`[SISTEMA] Pausado automáticamente: ${numeroClienteLimpio}`);
-
-
+        pausados.add(numeroClienteLimpio);
         delete esperandoNombre[chatId];
         return;
     }
 
-    // --- PROCESAR AUDIO O TEXTO ---
+    // --- PROCESAR MENSAJE ---
     let mensajeUsuario = message.body;
     if (message.hasMedia && (message.type === 'audio' || message.type === 'ptt')) {
         const media = await message.downloadMedia();
@@ -146,7 +109,7 @@ client.on('message', async (message) => {
     // --- DETECTOR MANUAL ---
     const frasesGatillo = ["hablar con humano", "asesor", "inscripcion", "pagar", "comprar"];
     if (frasesGatillo.some(f => mensajeUsuario.toLowerCase().includes(f))) {
-        await iniciarTransferencia(chatId, numeroRealDelCliente, mensajeUsuario, "manual", message);
+        await iniciarTransferencia(chatId, numeroClienteLimpio, mensajeUsuario, "manual", message);
         return;
     }
 
@@ -167,13 +130,13 @@ client.on('message', async (message) => {
 
         historiales[chatId].push({ role: "assistant", content: botResponse });
 
-        // CAMBIO CRÍTICO: Usamos sendMessage con { sendSeen: false } para evitar el crash
-        await client.sendMessage(message.from, botResponse, { sendSeen: false });
+        // CORREGIDO: Asegurar sendSeen false
+        await client.sendMessage(chatId, botResponse, { sendSeen: false });
 
         await chat.clearState();
     } catch (e) {
-        console.log("Error IA");
-        console.error(e);
+        console.log("Error IA o Envío");
+        console.error(e.message);
     }
 });
 
@@ -183,7 +146,7 @@ async function iniciarTransferencia(chatId, numeroReal, motivo, origen, messageO
         ? "¡Genial! Para la inscripción, dime tu **nombre completo**:"
         : "Para derivarte, dime tu **nombre completo**:";
 
-    // USAR SIEMPRE sendSeen: false
+    // CORREGIDO: Usar sendMessage con sendSeen: false
     await client.sendMessage(chatId, respuestaBot, { sendSeen: false });
 }
 
@@ -191,11 +154,16 @@ async function iniciarTransferencia(chatId, numeroReal, motivo, origen, messageO
 const app = express();
 app.use(express.json());
 app.post('/api/send-message', async (req, res) => {
-    const { number, message, apiKey } = req.body;
-    if (apiKey !== 'TU_CLAVE_SECRETA_123') return res.status(403).json({ error: 'Key error' });
-    const finalId = number.replace(/\D/g, '') + '@c.us';
-    await client.sendMessage(finalId, message, { sendSeen: false });
-    res.json({ success: true });
+    try {
+        const { number, message, apiKey } = req.body;
+        if (apiKey !== 'TU_CLAVE_SECRETA_123') return res.status(403).json({ error: 'Key error' });
+        const finalId = number.replace(/\D/g, '') + '@c.us';
+        // CORREGIDO: Mantenemos el parche aquí también
+        await client.sendMessage(finalId, message, { sendSeen: false });
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 app.listen(3000);
 client.initialize();
