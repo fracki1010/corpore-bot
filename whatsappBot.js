@@ -121,7 +121,7 @@ client.on('message', async (message) => {
 
         const alerta = `${titulo}\n👤: *${nombreCliente}*\n📱: ${numeroRealDelCliente}\n💬: ${motivo}\n\n🛑 Pausado. (!on ${numeroRealDelCliente} para volver)`;
 
-        for (const admin of NUMEROS_ADMINS) { await client.sendMessage(admin, alerta); }
+        for (const admin of NUMEROS_ADMINS) { await client.sendMessage(admin, alerta, { sendSeen: false }); }
         await message.reply(`¡Gracias ${nombreCliente}! Ya le avisé al equipo.`);
 
         // Agregamos a la lista de pausados automáticamente
@@ -185,7 +185,7 @@ app.post('/api/send-message', async (req, res) => {
     const { number, message, apiKey } = req.body;
     if (apiKey !== 'TU_CLAVE_SECRETA_123') return res.status(403).json({ error: 'Key error' });
     const finalId = number.replace(/\D/g, '') + '@c.us';
-    await client.sendMessage(finalId, message);
+    await client.sendMessage(finalId, message,{ sendSeen: false });
     res.json({ success: true });
 });
 app.listen(3000);
