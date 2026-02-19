@@ -7,16 +7,16 @@ const { getNumberContact } = require("./src/helpers/getNumberContact");
 const { normalizeNumber } = require("./src/helpers/normalizedNumber");
 
 const client = new Client({
-  authStrategy: new LocalAuth(),
+  authStrategy: new LocalAuth({
+    dataPath: "/app/.wwebjs_auth", // Ruta absoluta
+  }),
   puppeteer: {
+    headless: true,
     executablePath: "/usr/bin/google-chrome-stable",
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
-      "--disable-accelerated-2d-canvas",
-      "--no-first-run",
-      "--no-zygote",
       "--disable-gpu",
     ],
   },
@@ -39,6 +39,19 @@ client.on("qr", (qr) => {
     "⚠️ QR: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" +
       encodeURIComponent(qr),
   );
+});
+
+// Añade esto después de client.on('qr', ...)
+client.on("authenticated", () => {
+  console.log("✅ ¡AUTENTICADO EXITOSAMENTE!");
+});
+
+client.on("auth_failure", (msg) => {
+  console.error("❌ FALLO DE AUTENTICACIÓN:", msg);
+});
+
+client.on("loading_screen", (percent, message) => {
+  console.log("⏳ CARGANDO:", percent, "% -", message);
 });
 
 client.on("ready", () => console.log("✅ Bot Conectado"));
@@ -211,5 +224,7 @@ app.post("/api/send-message", async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
-app.listen(3000);
+app.listen(process.env.PORT || 3000, "0.0.0.0", () =>
+  console.log("API corriendo..."),
+);
 client.initialize();
