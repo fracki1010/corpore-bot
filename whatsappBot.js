@@ -54,7 +54,7 @@ client.on("qr", (qr) => {
       isPaused = false;
       console.log("✅ Ya puedes intentar generar otro QR.");
     },
-    5 * 60 * 1000,
+    2 * 60 * 1000,
   );
 });
 
