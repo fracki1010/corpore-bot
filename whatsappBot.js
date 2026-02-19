@@ -32,27 +32,12 @@ const NUMEROS_ADMINS = [
   "15152795652173@lid",
 ];
 
+let isPaused = false; // Variable de control para el bloqueo
+
 client.on("qr", (qr) => {
-  // Si está en pausa, no hacemos nada y salimos de la función
-  if (isPaused) return;
-
-  // Mostramos el QR
   console.log(
-    "⚠️ QR Generado: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" +
+    "⚠️ QR: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" +
       encodeURIComponent(qr),
-  );
-
-  // Activamos la pausa
-  isPaused = true;
-  console.log("⏳ Esperando 5 minutos antes de permitir un nuevo QR...");
-
-  // Programamos que se desbloquee en 5 minutos (300,000 milisegundos)
-  setTimeout(
-    () => {
-      isPaused = false;
-      console.log("✅ Ya puedes intentar generar otro QR.");
-    },
-    2 * 60 * 1000,
   );
 });
 
