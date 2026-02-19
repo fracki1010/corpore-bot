@@ -7,7 +7,9 @@ const { getNumberContact } = require("./src/helpers/getNumberContact");
 const { normalizeNumber } = require("./src/helpers/normalizedNumber");
 
 const client = new Client({
-  authStrategy: new LocalAuth(),
+  authStrategy: new LocalAuth({
+    dataPath: process.env.SESSION_PATH || "./.wwebjs_auth", // Permite cambiar la ruta si usas un Volumen en Railway
+  }),
   puppeteer: {
     executablePath: "/usr/bin/google-chrome-stable",
     args: [
@@ -211,5 +213,7 @@ app.post("/api/send-message", async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
-app.listen(3000);
+app.listen(process.env.PORT || 3000, "0.0.0.0", () =>
+  console.log("API corriendo..."),
+);
 client.initialize();
