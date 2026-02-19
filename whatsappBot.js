@@ -1,25 +1,25 @@
-require('dotenv').config();
-const express = require('express');
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const { getChatResponse } = require('./src/services/groqService');
-const { transcribirAudio } = require('./src/services/transcriptionService');
-const { getNumberContact } = require('./src/helpers/getNumberContact');
-const { normalizeNumber } = require('./src/helpers/normalizedNumber');
+require("dotenv").config();
+const express = require("express");
+const { Client, LocalAuth } = require("whatsapp-web.js");
+const { getChatResponse } = require("./src/services/groqService");
+const { transcribirAudio } = require("./src/services/transcriptionService");
+const { getNumberContact } = require("./src/helpers/getNumberContact");
+const { normalizeNumber } = require("./src/helpers/normalizedNumber");
 
 const client = new Client({
-    authStrategy: new LocalAuth(),
-    puppeteer: {
-        executablePath: '/usr/bin/google-chrome-stable',
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu'
-        ],
-    }
+  authStrategy: new LocalAuth(),
+  puppeteer: {
+    executablePath: "/usr/bin/google-chrome-stable",
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-accelerated-2d-canvas",
+      "--no-first-run",
+      "--no-zygote",
+      "--disable-gpu",
+    ],
+  },
 });
 
 const historiales = {};
@@ -27,143 +27,206 @@ const pausados = new Set();
 const esperandoNombre = {};
 
 const NUMEROS_ADMINS = [
-    '140278446997512@lid',
-    '5492622586046@c.us',
-    '15152795652173@lid'
+  "140278446997512@lid",
+  "5492622586046@c.us",
+  "15152795652173@lid",
 ];
 
-client.on('qr', (qr) => {
-    console.log('⚠️ QR: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(qr));
+let isPaused = false; // Variable de control para el bloqueo
+
+client.on("qr", (qr) => {
+  // Si está en pausa, no hacemos nada y salimos de la función
+  if (isPaused) return;
+
+  // Mostramos el QR
+  console.log(
+    "⚠️ QR Generado: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" +
+      encodeURIComponent(qr),
+  );
+
+  // Activamos la pausa
+  isPaused = true;
+  console.log("⏳ Esperando 5 minutos antes de permitir un nuevo QR...");
+
+  // Programamos que se desbloquee en 5 minutos (300,000 milisegundos)
+  setTimeout(
+    () => {
+      isPaused = false;
+      console.log("✅ Ya puedes intentar generar otro QR.");
+    },
+    5 * 60 * 1000,
+  );
 });
 
-client.on('ready', () => console.log('✅ Bot Conectado'));
+client.on("ready", () => console.log("✅ Bot Conectado"));
 
-client.on('message', async (message) => {
-    if (message.from === 'status@broadcast') return;
+client.on("message", async (message) => {
+  if (message.from === "status@broadcast") return;
 
-    // 1. OBTENER NÚMERO NORMALIZADO
-    const numeroClienteLimpio = await getNumberContact(message);
-    const chatId = message.from;
+  // 1. OBTENER NÚMERO NORMALIZADO
+  const numeroClienteLimpio = await getNumberContact(message);
+  const chatId = message.from;
 
-    // --- ZONA ADMIN ---
-    if (NUMEROS_ADMINS.includes(message.from)) {
-        // COMANDO: !off
-        if (message.body.startsWith('!off ')) {
-            let targetNumber = message.body.split(' ')[1];
-            if (!targetNumber) return;
-            targetNumber = normalizeNumber(targetNumber);
-            pausados.add(targetNumber);
-            // CORREGIDO: Usar sendMessage con sendSeen: false en lugar de reply
-            await client.sendMessage(chatId, `🛑 Bot PAUSADO para ${targetNumber}.`, { sendSeen: false });
-            return;
-        }
-
-        // COMANDO: !on
-        if (message.body.startsWith('!on ')) {
-            let targetNumber = message.body.split(' ')[1];
-            if (!targetNumber) return;
-            targetNumber = normalizeNumber(targetNumber);
-            pausados.delete(targetNumber);
-            delete historiales[chatId];
-            // CORREGIDO: Usar sendMessage con sendSeen: false
-            await client.sendMessage(chatId, `✅ Bot REACTIVADO para ${targetNumber}.`, { sendSeen: false });
-            return;
-        }
+  // --- ZONA ADMIN ---
+  if (NUMEROS_ADMINS.includes(message.from)) {
+    // COMANDO: !off
+    if (message.body.startsWith("!off ")) {
+      let targetNumber = message.body.split(" ")[1];
+      if (!targetNumber) return;
+      targetNumber = normalizeNumber(targetNumber);
+      pausados.add(targetNumber);
+      // CORREGIDO: Usar sendMessage con sendSeen: false en lugar de reply
+      await client.sendMessage(chatId, `🛑 Bot PAUSADO para ${targetNumber}.`, {
+        sendSeen: false,
+      });
+      return;
     }
 
-    // --- CHECK DE PAUSA ---
-    if (pausados.has(numeroClienteLimpio)) {
-        console.log(`🙊 Chat pausado para ${numeroClienteLimpio}`);
-        return;
+    // COMANDO: !on
+    if (message.body.startsWith("!on ")) {
+      let targetNumber = message.body.split(" ")[1];
+      if (!targetNumber) return;
+      targetNumber = normalizeNumber(targetNumber);
+      pausados.delete(targetNumber);
+      delete historiales[chatId];
+      // CORREGIDO: Usar sendMessage con sendSeen: false
+      await client.sendMessage(
+        chatId,
+        `✅ Bot REACTIVADO para ${targetNumber}.`,
+        { sendSeen: false },
+      );
+      return;
+    }
+  }
+
+  // --- CHECK DE PAUSA ---
+  if (pausados.has(numeroClienteLimpio)) {
+    console.log(`🙊 Chat pausado para ${numeroClienteLimpio}`);
+    return;
+  }
+
+  // --- RECIBIR NOMBRE ---
+  if (esperandoNombre[chatId]) {
+    const nombreCliente = message.body;
+    const { motivo, origen } = esperandoNombre[chatId];
+    let titulo = origen === "cierre_venta" ? "💰 VENTA" : "⚠️ RECLAMO";
+
+    const alerta = `${titulo}\n👤: *${nombreCliente}*\n📱: ${numeroClienteLimpio}\n💬: ${motivo}\n\n🛑 Pausado. (!on ${numeroClienteLimpio} para volver)`;
+
+    for (const admin of NUMEROS_ADMINS) {
+      // CORREGIDO: Ya tenía sendSeen, mantenemos seguridad
+      await client
+        .sendMessage(admin, alerta, { sendSeen: false })
+        .catch((e) => console.log("Error aviso admin"));
     }
 
-    // --- RECIBIR NOMBRE ---
-    if (esperandoNombre[chatId]) {
-        const nombreCliente = message.body;
-        const { motivo, origen } = esperandoNombre[chatId];
-        let titulo = origen === 'cierre_venta' ? '💰 VENTA' : '⚠️ RECLAMO';
+    // CORREGIDO: Usar sendMessage en lugar de reply
+    await client.sendMessage(
+      chatId,
+      `¡Gracias ${nombreCliente}! Ya le avisé al equipo.`,
+      { sendSeen: false },
+    );
 
-        const alerta = `${titulo}\n👤: *${nombreCliente}*\n📱: ${numeroClienteLimpio}\n💬: ${motivo}\n\n🛑 Pausado. (!on ${numeroClienteLimpio} para volver)`;
+    pausados.add(numeroClienteLimpio);
+    delete esperandoNombre[chatId];
+    return;
+  }
 
-        for (const admin of NUMEROS_ADMINS) { 
-            // CORREGIDO: Ya tenía sendSeen, mantenemos seguridad
-            await client.sendMessage(admin, alerta, { sendSeen: false }).catch(e => console.log("Error aviso admin")); 
-        }
+  // --- PROCESAR MENSAJE ---
+  let mensajeUsuario = message.body;
+  if (
+    message.hasMedia &&
+    (message.type === "audio" || message.type === "ptt")
+  ) {
+    const media = await message.downloadMedia();
+    mensajeUsuario = await transcribirAudio(media);
+  }
+  if (!mensajeUsuario) return;
 
-        // CORREGIDO: Usar sendMessage en lugar de reply
-        await client.sendMessage(chatId, `¡Gracias ${nombreCliente}! Ya le avisé al equipo.`, { sendSeen: false });
+  // --- DETECTOR MANUAL ---
+  const frasesGatillo = [
+    "hablar con humano",
+    "asesor",
+    "inscripcion",
+    "pagar",
+    "comprar",
+  ];
+  if (frasesGatillo.some((f) => mensajeUsuario.toLowerCase().includes(f))) {
+    await iniciarTransferencia(
+      chatId,
+      numeroClienteLimpio,
+      mensajeUsuario,
+      "manual",
+      message,
+    );
+    return;
+  }
 
-        pausados.add(numeroClienteLimpio);
-        delete esperandoNombre[chatId];
-        return;
+  // --- IA GROQ ---
+  if (!historiales[chatId]) historiales[chatId] = [];
+  historiales[chatId].push({ role: "user", content: mensajeUsuario });
+
+  try {
+    const chat = await message.getChat();
+    await chat.sendStateTyping();
+
+    let botResponse = await getChatResponse(historiales[chatId]);
+
+    if (botResponse.includes("[TRANSFERIR_HUMANO]")) {
+      await iniciarTransferencia(
+        chatId,
+        numeroClienteLimpio,
+        "IA detectó cierre",
+        "cierre_venta",
+        message,
+      );
+      return;
     }
 
-    // --- PROCESAR MENSAJE ---
-    let mensajeUsuario = message.body;
-    if (message.hasMedia && (message.type === 'audio' || message.type === 'ptt')) {
-        const media = await message.downloadMedia();
-        mensajeUsuario = await transcribirAudio(media);
-    }
-    if (!mensajeUsuario) return;
+    historiales[chatId].push({ role: "assistant", content: botResponse });
 
-    // --- DETECTOR MANUAL ---
-    const frasesGatillo = ["hablar con humano", "asesor", "inscripcion", "pagar", "comprar"];
-    if (frasesGatillo.some(f => mensajeUsuario.toLowerCase().includes(f))) {
-        await iniciarTransferencia(chatId, numeroClienteLimpio, mensajeUsuario, "manual", message);
-        return;
-    }
+    // CORREGIDO: Asegurar sendSeen false
+    await client.sendMessage(chatId, botResponse, { sendSeen: false });
 
-    // --- IA GROQ ---
-    if (!historiales[chatId]) historiales[chatId] = [];
-    historiales[chatId].push({ role: "user", content: mensajeUsuario });
-
-    try {
-        const chat = await message.getChat();
-        await chat.sendStateTyping();
-
-        let botResponse = await getChatResponse(historiales[chatId]);
-
-        if (botResponse.includes('[TRANSFERIR_HUMANO]')) {
-            await iniciarTransferencia(chatId, numeroClienteLimpio, "IA detectó cierre", "cierre_venta", message);
-            return;
-        }
-
-        historiales[chatId].push({ role: "assistant", content: botResponse });
-
-        // CORREGIDO: Asegurar sendSeen false
-        await client.sendMessage(chatId, botResponse, { sendSeen: false });
-
-        await chat.clearState();
-    } catch (e) {
-        console.log("Error IA o Envío");
-        console.error(e.message);
-    }
+    await chat.clearState();
+  } catch (e) {
+    console.log("Error IA o Envío");
+    console.error(e.message);
+  }
 });
 
-async function iniciarTransferencia(chatId, numeroReal, motivo, origen, messageObj) {
-    esperandoNombre[chatId] = { motivo, origen };
-    let respuestaBot = origen === 'cierre_venta'
-        ? "¡Genial! Para la inscripción, dime tu **nombre completo**:"
-        : "Para derivarte, dime tu **nombre completo**:";
+async function iniciarTransferencia(
+  chatId,
+  numeroReal,
+  motivo,
+  origen,
+  messageObj,
+) {
+  esperandoNombre[chatId] = { motivo, origen };
+  let respuestaBot =
+    origen === "cierre_venta"
+      ? "¡Genial! Para la inscripción, dime tu **nombre completo**:"
+      : "Para derivarte, dime tu **nombre completo**:";
 
-    // CORREGIDO: Usar sendMessage con sendSeen: false
-    await client.sendMessage(chatId, respuestaBot, { sendSeen: false });
+  // CORREGIDO: Usar sendMessage con sendSeen: false
+  await client.sendMessage(chatId, respuestaBot, { sendSeen: false });
 }
 
 // API
 const app = express();
 app.use(express.json());
-app.post('/api/send-message', async (req, res) => {
-    try {
-        const { number, message, apiKey } = req.body;
-        if (apiKey !== 'TU_CLAVE_SECRETA_123') return res.status(403).json({ error: 'Key error' });
-        const finalId = number.replace(/\D/g, '') + '@c.us';
-        // CORREGIDO: Mantenemos el parche aquí también
-        await client.sendMessage(finalId, message, { sendSeen: false });
-        res.json({ success: true });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
+app.post("/api/send-message", async (req, res) => {
+  try {
+    const { number, message, apiKey } = req.body;
+    if (apiKey !== "TU_CLAVE_SECRETA_123")
+      return res.status(403).json({ error: "Key error" });
+    const finalId = number.replace(/\D/g, "") + "@c.us";
+    // CORREGIDO: Mantenemos el parche aquí también
+    await client.sendMessage(finalId, message, { sendSeen: false });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 app.listen(3000);
 client.initialize();
