@@ -8,7 +8,7 @@ const { normalizeNumber } = require("./src/helpers/normalizedNumber");
 
 const client = new Client({
   authStrategy: new LocalAuth({
-    dataPath: "/app/.wwebjs_auth", // Ruta absoluta
+    dataPath: "./.wwebjs_auth", // <--- Cambio clave aquí
   }),
   puppeteer: {
     headless: true,
@@ -18,7 +18,7 @@ const client = new Client({
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",
-      "--single-process",
+      "--no-zygote",
     ],
     handleSIGINT: false,
     handleSIGTERM: false,
