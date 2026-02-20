@@ -20,6 +20,9 @@ const client = new Client({
       "--disable-gpu",
       "--single-process",
     ],
+    handleSIGINT: false,
+    handleSIGTERM: false,
+    handleSIGHUP: false,
   },
 });
 
