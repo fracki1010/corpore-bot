@@ -8,8 +8,14 @@ const { normalizeNumber } = require("./src/helpers/normalizedNumber");
 
 const client = new Client({
   authStrategy: new LocalAuth({
-    dataPath: "./.wwebjs_auth", // <--- Cambio clave aquí
+    dataPath: "/usr/src/app/.wwebjs_auth",
   }),
+  // Evitar que falle si WhatsApp actualiza su versión web
+  webVersionCache: {
+    type: "remote",
+    remotePath:
+      "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html",
+  },
   puppeteer: {
     headless: true,
     executablePath: "/usr/bin/google-chrome-stable",
@@ -19,6 +25,8 @@ const client = new Client({
       "--disable-dev-shm-usage",
       "--disable-gpu",
       "--no-zygote",
+      "--disable-software-rasterizer", // Ayuda con el consumo de CPU
+      "--mute-audio", // No necesitamos audio
     ],
     handleSIGINT: false,
     handleSIGTERM: false,
@@ -45,6 +53,16 @@ client.on("qr", (qr) => {
   );
 });
 
+client.on("loading_screen", (percent, message) => {
+  console.log(`⏳ Cargando WhatsApp: ${percent}% - ${message}`);
+});
+
+client.on("disconnected", (reason) => {
+  console.log("❌ WhatsApp desconectado. Razón:", reason);
+  // Opcional: Destruir el cliente para que el contenedor falle y Railway lo reinicie limpio
+  client.destroy();
+});
+
 // Añade esto después de client.on('qr', ...)
 client.on("authenticated", () => {
   console.log("✅ ¡AUTENTICADO EXITOSAMENTE!");
@@ -52,10 +70,6 @@ client.on("authenticated", () => {
 
 client.on("auth_failure", (msg) => {
   console.error("❌ FALLO DE AUTENTICACIÓN:", msg);
-});
-
-client.on("loading_screen", (percent, message) => {
-  console.log("⏳ CARGANDO:", percent, "% -", message);
 });
 
 client.on("ready", () => console.log("✅ Bot Conectado"));
