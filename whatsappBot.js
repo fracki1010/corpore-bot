@@ -7,18 +7,30 @@ const { getNumberContact } = require("./src/helpers/getNumberContact");
 const { normalizeNumber } = require("./src/helpers/normalizedNumber");
 
 const client = new Client({
-  authStrategy: new LocalAuth(),
+  authStrategy: new LocalAuth({
+    dataPath: "/usr/src/app/.wwebjs_auth",
+  }),
+  // Evitar que falle si WhatsApp actualiza su versión web
+  webVersionCache: {
+    type: "remote",
+    remotePath:
+      "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html",
+  },
   puppeteer: {
+    headless: true,
     executablePath: "/usr/bin/google-chrome-stable",
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
-      "--disable-accelerated-2d-canvas",
-      "--no-first-run",
-      "--no-zygote",
       "--disable-gpu",
+      "--no-zygote",
+      "--disable-software-rasterizer", // Ayuda con el consumo de CPU
+      "--mute-audio", // No necesitamos audio
     ],
+    handleSIGINT: false,
+    handleSIGTERM: false,
+    handleSIGHUP: false,
   },
 });
 
@@ -35,12 +47,8 @@ const NUMEROS_ADMINS = [
 let isPaused = false; // Variable de control para el bloqueo
 
 client.on("qr", (qr) => {
-  // Si está en pausa, no hacemos nada y salimos de la función
-  if (isPaused) return;
-
-  // Mostramos el QR
   console.log(
-    "⚠️ QR Generado: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" +
+    "⚠️ QR: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" +
       encodeURIComponent(qr),
   );
 
@@ -247,5 +255,7 @@ app.post("/api/send-message", async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
-app.listen(3000);
+app.listen(process.env.PORT || 3000, "0.0.0.0", () =>
+  console.log("API corriendo..."),
+);
 client.initialize();
