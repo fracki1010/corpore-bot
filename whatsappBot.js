@@ -109,7 +109,9 @@ client.on("message", async (message) => {
   if (esperandoNombre[chatId]) {
     const nombreCliente = message.body;
     const { motivo, origen } = esperandoNombre[chatId];
-    let titulo = origen === "cierre_venta" ? "💰 VENTA" : "⚠️ RECLAMO";
+    let titulo = "⚠️ RECLAMO";
+    if (origen === "cierre_venta") titulo = "💰 VENTA";
+    if (origen === "consulta_admin") titulo = "🏦 ADMINISTRACIÓN";
 
     const alerta = `${titulo}\n👤: *${nombreCliente}*\n📱: ${numeroClienteLimpio}\n💬: ${motivo}\n\n🛑 Pausado. (!on ${numeroClienteLimpio} para volver)`;
 
@@ -172,12 +174,26 @@ client.on("message", async (message) => {
 
     let botResponse = await getChatResponse(historiales[chatId]);
 
-    if (botResponse.includes("[TRANSFERIR_HUMANO]")) {
+    if (
+      botResponse.includes("[TRANSFERIR_HUMANO]") ||
+      botResponse.includes("[TRANSFERIR_VENTA]")
+    ) {
       await iniciarTransferencia(
         chatId,
         numeroClienteLimpio,
-        "IA detectó cierre",
+        "IA detectó cierre de venta",
         "cierre_venta",
+        message,
+      );
+      return;
+    }
+
+    if (botResponse.includes("[TRANSFERIR_ADMIN]")) {
+      await iniciarTransferencia(
+        chatId,
+        numeroClienteLimpio,
+        "IA detectó consulta deuda/admin",
+        "consulta_admin",
         message,
       );
       return;
@@ -203,10 +219,13 @@ async function iniciarTransferencia(
   messageObj,
 ) {
   esperandoNombre[chatId] = { motivo, origen };
-  let respuestaBot =
-    origen === "cierre_venta"
-      ? "¡Genial! Para la inscripción, dime tu **nombre completo**:"
-      : "Para derivarte, dime tu **nombre completo**:";
+  let respuestaBot = "Para derivarte, dime tu **nombre completo**:";
+  if (origen === "cierre_venta") {
+    respuestaBot = "¡Genial! Para la inscripción, dime tu **nombre completo**:";
+  } else if (origen === "consulta_admin") {
+    respuestaBot =
+      "Entendido, dime tu **nombre completo** para avisar a administración:";
+  }
 
   // CORREGIDO: Usar sendMessage con sendSeen: false
   await client.sendMessage(chatId, respuestaBot, { sendSeen: false });
