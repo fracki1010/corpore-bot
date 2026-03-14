@@ -239,23 +239,87 @@ async function iniciarTransferencia(
   await client.sendMessage(chatId, respuestaBot, { sendSeen: false });
 }
 
+// --- SISTEMA DE COLA PARA EVITAR SPAM/BLOQUEOS ---
+const messageQueue = [];
+let isProcessingQueue = false;
+
+async function processQueue() {
+  if (isProcessingQueue || messageQueue.length === 0) return;
+  isProcessingQueue = true;
+
+  console.log(
+    `🚀 Iniciando procesamiento de cola. Mensajes pendientes: ${messageQueue.length}`,
+  );
+
+  while (messageQueue.length > 0) {
+    const { number, message, resolve, reject } = messageQueue[0];
+
+    try {
+      const finalId = number.replace(/\D/g, "") + "@c.us";
+      await client.sendMessage(finalId, message, { sendSeen: false });
+      console.log(
+        `✅ Mensaje enviado a ${number}. Restantes: ${messageQueue.length - 1}`,
+      );
+
+      // Notificamos éxito si hay una promesa esperando (opcional para uso interno)
+      if (resolve) resolve({ success: true, number });
+    } catch (e) {
+      console.error(`❌ Error enviando a ${number}:`, e.message);
+      if (reject) reject(e);
+    }
+
+    // Quitamos el mensaje procesado
+    messageQueue.shift();
+
+    // Si quedan mensajes, esperamos entre 35 y 45 segundos (promedio 40s)
+    if (messageQueue.length > 0) {
+      const delay = Math.floor(Math.random() * (45000 - 35000 + 1)) + 35000;
+      console.log(
+        `⏳ Esperando ${Math.round(delay / 1000)}s para el siguiente mensaje...`,
+      );
+      await new Promise((res) => setTimeout(res, delay));
+    }
+  }
+
+  isProcessingQueue = false;
+  console.log("🏁 Cola vacía. Procesamiento finalizado.");
+}
+
 // API
 const app = express();
 app.use(express.json());
+
 app.post("/api/send-message", async (req, res) => {
   try {
     const { number, message, apiKey } = req.body;
-    if (apiKey !== "TU_CLAVE_SECRETA_123")
+    if (apiKey !== "TU_CLAVE_SECRETA_123") {
       return res.status(403).json({ error: "Key error" });
-    const finalId = number.replace(/\D/g, "") + "@c.us";
-    // CORREGIDO: Mantenemos el parche aquí también
-    await client.sendMessage(finalId, message, { sendSeen: false });
-    res.json({ success: true });
+    }
+
+    if (!number || !message) {
+      return res.status(400).json({ error: "Faltan datos (number o message)" });
+    }
+
+    // Encolar el mensaje
+    messageQueue.push({ number, message });
+
+    // Iniciar el procesador si no está corriendo
+    processQueue();
+
+    res.json({
+      success: true,
+      status: "Encolado",
+      message:
+        "El mensaje se enviará respetando el intervalo de seguridad (40s).",
+      queuePosition: messageQueue.length,
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
+
 app.listen(process.env.PORT || 3000, "0.0.0.0", () =>
   console.log("API corriendo..."),
 );
+
 client.initialize();
