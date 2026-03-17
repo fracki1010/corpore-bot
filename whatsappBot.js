@@ -271,9 +271,9 @@ async function processQueue() {
     // Quitamos el mensaje procesado
     messageQueue.shift();
 
-    // Si quedan mensajes, esperamos entre 60 y 120 segundos (promedio 90s)
+    // Si quedan mensajes, esperamos entre 300  y 600 segundos (promedio 450s)
     if (messageQueue.length > 0) {
-      const delay = Math.floor(Math.random() * (120000 - 60000 + 1)) + 60000;
+      const delay = Math.floor(Math.random() * (600000 - 300000 + 1)) + 300000;
       console.log(
         `⏳ Esperando ${Math.round(delay / 1000)}s para el siguiente mensaje...`,
       );
