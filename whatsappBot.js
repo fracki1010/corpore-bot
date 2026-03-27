@@ -1,20 +1,77 @@
 require("dotenv").config();
 const express = require("express");
+const cors = require("cors");
+const fs = require("fs");
+const path = require("path");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const { getChatResponse } = require("./src/services/groqService");
 const { transcribirAudio } = require("./src/services/transcriptionService");
 const { getNumberContact } = require("./src/helpers/getNumberContact");
 const { normalizeNumber } = require("./src/helpers/normalizedNumber");
+const scheduleOverridesRoutes = require("./src/routes/scheduleOverridesRoutes");
+const { requireAdminApiKey } = require("./src/middlewares/adminApiKeyMiddleware");
+
+const isProduction = process.env.NODE_ENV === "production";
+const defaultAuthPath = isProduction
+  ? "/usr/src/app/.wwebjs_auth"
+  : path.join(process.cwd(), ".wwebjs_auth");
+const authDataPath = process.env.WWEBJS_AUTH_PATH || defaultAuthPath;
+const sessionDataPath = path.join(authDataPath, "session");
+const webVersionRemotePath =
+  process.env.WWEBJS_REMOTE_PATH ||
+  "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1036065881-alpha.html";
+
+function safeRemove(filePath) {
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.rmSync(filePath, { force: true });
+    }
+  } catch (_error) {
+    // Evitamos romper el arranque si no se puede borrar por permisos.
+  }
+}
+
+function cleanOrValidateSessionLocks() {
+  const lockPath = path.join(sessionDataPath, "SingletonLock");
+
+  try {
+    if (fs.existsSync(lockPath)) {
+      const linkTarget = fs.readlinkSync(lockPath);
+      const pid = Number(String(linkTarget).split("-").pop());
+
+      if (Number.isFinite(pid)) {
+        try {
+          process.kill(pid, 0);
+          console.error(
+            `❌ Ya hay una instancia de Chrome usando la sesión (${sessionDataPath}) [PID ${pid}].`,
+          );
+          console.error("Cerrá la instancia previa del bot antes de iniciar otra.");
+          process.exit(1);
+        } catch (_notRunning) {
+          // PID inexistente: lock stale, limpiamos abajo.
+        }
+      }
+    }
+  } catch (_error) {
+    // Si falla la validación del symlink, intentamos limpieza de stale locks.
+  }
+
+  safeRemove(path.join(sessionDataPath, "SingletonLock"));
+  safeRemove(path.join(sessionDataPath, "SingletonSocket"));
+  safeRemove(path.join(sessionDataPath, "SingletonCookie"));
+  safeRemove(path.join(sessionDataPath, "DevToolsActivePort"));
+}
+
+cleanOrValidateSessionLocks();
 
 const client = new Client({
   authStrategy: new LocalAuth({
-    dataPath: "/usr/src/app/.wwebjs_auth",
+    dataPath: authDataPath,
   }),
-  // Evitar que falle si WhatsApp actualiza su versión web
+  // Fijamos una versión remota vigente para evitar "conecta pero no entrega eventos".
   webVersionCache: {
     type: "remote",
-    remotePath:
-      "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html",
+    remotePath: webVersionRemotePath,
   },
   puppeteer: {
     headless: true,
@@ -37,6 +94,15 @@ const client = new Client({
 const historiales = {};
 const pausados = new Set();
 const esperandoNombre = {};
+let lastQr = null;
+let lastQrAt = null;
+let botState = "starting";
+let lifecycleActionInProgress = false;
+let lastInboundMessageAt = null;
+let lastOutboundMessageAt = null;
+let lastKnownWaState = null;
+let lastKnownConnected = null;
+const processedMessageIds = new Set();
 
 const NUMEROS_ADMINS = [
   "140278446997512@lid",
@@ -46,7 +112,51 @@ const NUMEROS_ADMINS = [
 
 let isPaused = false; // Variable de control para el bloqueo
 
+async function refreshConnectionSnapshot(trigger) {
+  let waState = null;
+  try {
+    waState = await client.getState();
+  } catch (_error) {
+    waState = null;
+  }
+
+  const normalizedWaState = waState ? String(waState).toLowerCase() : null;
+  const wid = client?.info?.wid?._serialized || null;
+  const isConnected =
+    normalizedWaState === "connected" ||
+    normalizedWaState === "open" ||
+    normalizedWaState === "ready";
+
+  if (isConnected) {
+    botState = normalizedWaState || "connected";
+    lastQr = null;
+  } else if (normalizedWaState) {
+    botState = normalizedWaState;
+  }
+
+  if (lastKnownWaState !== normalizedWaState) {
+    console.log(
+      `🔄 Snapshot [${trigger}] -> state=${normalizedWaState || "null"} wid=${wid || "null"} connected=${isConnected}`,
+    );
+    lastKnownWaState = normalizedWaState;
+  }
+
+  if (lastKnownConnected !== isConnected) {
+    if (isConnected) {
+      console.log("✅ Bot Conectado");
+    } else if (lastKnownConnected !== null) {
+      console.log("❌ Bot Desconectado");
+    }
+    lastKnownConnected = isConnected;
+  }
+
+  return { waState: normalizedWaState, wid, isConnected };
+}
+
 client.on("qr", (qr) => {
+  lastQr = qr;
+  lastQrAt = new Date().toISOString();
+  botState = "qr";
   console.log(
     "⚠️ QR: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" +
       encodeURIComponent(qr),
@@ -64,16 +174,70 @@ client.on("qr", (qr) => {
     },
     2 * 60 * 1000,
   );
+
+  refreshConnectionSnapshot("qr").catch(() => {});
 });
 
-client.on("ready", () => console.log("✅ Bot Conectado"));
+client.on("ready", () => {
+  refreshConnectionSnapshot("ready").catch(() => {});
+});
 
-client.on("message", async (message) => {
-  if (message.from === "status@broadcast") return;
+client.on("authenticated", () => {
+  botState = "authenticated";
+  lastQr = null;
+  console.log("🔐 WhatsApp autenticado correctamente.");
+  refreshConnectionSnapshot("authenticated").catch(() => {});
+});
 
-  // 1. OBTENER NÚMERO NORMALIZADO
-  const numeroClienteLimpio = await getNumberContact(message);
-  const chatId = message.from;
+client.on("loading_screen", () => {
+  botState = "loading";
+  console.log("⏳ Estado WhatsApp: loading");
+  refreshConnectionSnapshot("loading_screen").catch(() => {});
+});
+
+client.on("change_state", async (state) => {
+  if (state) {
+    botState = String(state).toLowerCase();
+    console.log(`🔄 Estado WhatsApp cambiado a: ${botState}`);
+  }
+  await refreshConnectionSnapshot("change_state");
+});
+
+client.on("disconnected", async (reason) => {
+  botState = "disconnected";
+  console.log(`⚠️ Evento disconnected. reason=${reason || "unknown"}`);
+  await refreshConnectionSnapshot("disconnected");
+});
+
+client.on("auth_failure", () => {
+  botState = "auth_failure";
+  refreshConnectionSnapshot("auth_failure").catch(() => {});
+});
+
+async function handleIncomingMessage(message, source = "message") {
+  try {
+    const msgId = message?.id?._serialized || `${source}-${Date.now()}`;
+    if (processedMessageIds.has(msgId)) return;
+    processedMessageIds.add(msgId);
+    if (processedMessageIds.size > 2000) processedMessageIds.clear();
+
+    const preview =
+      typeof message.body === "string" ? message.body.slice(0, 60) : "<sin-texto>";
+    console.log(
+      `🧪 ${source} fromMe=${Boolean(message.fromMe)} from=${message.from} type=${message.type} body="${preview}"`,
+    );
+
+    if (message.from === "status@broadcast") return;
+    if (message.fromMe) {
+      console.log("↩️ Mensaje propio detectado (fromMe=true). No se responde para evitar loops.");
+      return;
+    }
+    lastInboundMessageAt = new Date().toISOString();
+    console.log(`📩 Mensaje entrante desde ${message.from} (${message.type})`);
+
+    // 1. OBTENER NÚMERO NORMALIZADO
+    const numeroClienteLimpio = await getNumberContact(message);
+    const chatId = message.from;
 
   // --- ZONA ADMIN ---
   if (NUMEROS_ADMINS.includes(message.from)) {
@@ -87,6 +251,7 @@ client.on("message", async (message) => {
       await client.sendMessage(chatId, `🛑 Bot PAUSADO para ${targetNumber}.`, {
         sendSeen: false,
       });
+      lastOutboundMessageAt = new Date().toISOString();
       return;
     }
 
@@ -103,6 +268,7 @@ client.on("message", async (message) => {
         `✅ Bot REACTIVADO para ${targetNumber}.`,
         { sendSeen: false },
       );
+      lastOutboundMessageAt = new Date().toISOString();
       return;
     }
   }
@@ -136,6 +302,7 @@ client.on("message", async (message) => {
       `¡Gracias ${nombreCliente}! Ya le avisé al equipo.`,
       { sendSeen: false },
     );
+    lastOutboundMessageAt = new Date().toISOString();
 
     pausados.add(numeroClienteLimpio);
     delete esperandoNombre[chatId];
@@ -211,12 +378,24 @@ client.on("message", async (message) => {
 
     // CORREGIDO: Asegurar sendSeen false
     await client.sendMessage(chatId, botResponse, { sendSeen: false });
+    lastOutboundMessageAt = new Date().toISOString();
 
     await chat.clearState();
   } catch (e) {
     console.log("Error IA o Envío");
     console.error(e.message);
   }
+  } catch (error) {
+    console.error("❌ Error procesando mensaje entrante:", error?.message || error);
+  }
+}
+
+client.on("message", async (message) => {
+  await handleIncomingMessage(message, "message");
+});
+
+client.on("message_create", async (message) => {
+  await handleIncomingMessage(message, "message_create");
 });
 
 async function iniciarTransferencia(
@@ -237,6 +416,7 @@ async function iniciarTransferencia(
 
   // CORREGIDO: Usar sendMessage con sendSeen: false
   await client.sendMessage(chatId, respuestaBot, { sendSeen: false });
+  lastOutboundMessageAt = new Date().toISOString();
 }
 
 // --- SISTEMA DE COLA PARA EVITAR SPAM/BLOQUEOS ---
@@ -257,6 +437,7 @@ async function processQueue() {
     try {
       const finalId = number.replace(/\D/g, "") + "@c.us";
       await client.sendMessage(finalId, message, { sendSeen: false });
+      lastOutboundMessageAt = new Date().toISOString();
       console.log(
         `✅ Mensaje enviado a ${number}. Restantes: ${messageQueue.length - 1}`,
       );
@@ -287,7 +468,147 @@ async function processQueue() {
 
 // API
 const app = express();
+const corsOrigin = process.env.CORS_ORIGIN || process.env.FRONTEND_ORIGIN || "http://localhost:5173";
+const corsConfig = {
+  origin: corsOrigin,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-admin-key"],
+};
+
+app.use(cors(corsConfig));
 app.use(express.json());
+app.use("/api/schedule-overrides", scheduleOverridesRoutes);
+
+async function getStatusPayload() {
+  const snapshot = await refreshConnectionSnapshot("status_api");
+  const normalizedWaState = snapshot.waState;
+  const isReadyByState = ["connected", "open", "ready"].includes(normalizedWaState);
+  const isReadyByLifecycle = ["ready", "connected", "open"].includes(botState);
+  const isReady = snapshot.isConnected || isReadyByState || isReadyByLifecycle;
+
+  if (isReady) {
+    lastQr = null;
+  }
+
+  return {
+    state: normalizedWaState || botState,
+    internalState: botState,
+    isReady,
+    hasQr: Boolean(lastQr),
+    qr: lastQr,
+    lastQrAt,
+    wid: snapshot.wid,
+    waState: normalizedWaState,
+    lastInboundMessageAt,
+    lastOutboundMessageAt,
+    queueLength: messageQueue.length,
+    authDataPath,
+  };
+}
+
+async function startWhatsappClient() {
+  botState = "starting";
+  await client.initialize();
+}
+
+async function stopWhatsappClient() {
+  botState = "stopping";
+  await client.destroy();
+  botState = "stopped";
+  lastQr = null;
+}
+
+app.get("/api/admin/whatsapp/status", requireAdminApiKey, async (_req, res) => {
+  return res.status(200).json({
+    success: true,
+    data: await getStatusPayload(),
+  });
+});
+
+app.post("/api/admin/whatsapp/start", requireAdminApiKey, async (_req, res) => {
+  if (lifecycleActionInProgress) {
+    return res.status(409).json({ success: false, error: "Hay una acción en progreso." });
+  }
+
+  if (botState === "ready" || botState === "qr" || botState === "loading") {
+    return res.status(200).json({
+      success: true,
+      message: "El bot ya está activo.",
+      data: await getStatusPayload(),
+    });
+  }
+
+  lifecycleActionInProgress = true;
+  try {
+    await startWhatsappClient();
+    return res.status(200).json({
+      success: true,
+      message: "Inicio solicitado.",
+      data: await getStatusPayload(),
+    });
+  } catch (error) {
+    botState = "error";
+    return res.status(500).json({
+      success: false,
+      error: error.message || "No se pudo iniciar el bot.",
+    });
+  } finally {
+    lifecycleActionInProgress = false;
+  }
+});
+
+app.post("/api/admin/whatsapp/stop", requireAdminApiKey, async (_req, res) => {
+  if (lifecycleActionInProgress) {
+    return res.status(409).json({ success: false, error: "Hay una acción en progreso." });
+  }
+
+  lifecycleActionInProgress = true;
+  try {
+    await stopWhatsappClient();
+    return res.status(200).json({
+      success: true,
+      message: "Bot detenido.",
+      data: await getStatusPayload(),
+    });
+  } catch (error) {
+    botState = "error";
+    return res.status(500).json({
+      success: false,
+      error: error.message || "No se pudo detener el bot.",
+    });
+  } finally {
+    lifecycleActionInProgress = false;
+  }
+});
+
+app.post("/api/admin/whatsapp/restart", requireAdminApiKey, async (_req, res) => {
+  if (lifecycleActionInProgress) {
+    return res.status(409).json({ success: false, error: "Hay una acción en progreso." });
+  }
+
+  lifecycleActionInProgress = true;
+  try {
+    try {
+      await stopWhatsappClient();
+    } catch (_error) {
+      // Si ya estaba detenido, continuamos.
+    }
+    await startWhatsappClient();
+    return res.status(200).json({
+      success: true,
+      message: "Bot reiniciado.",
+      data: await getStatusPayload(),
+    });
+  } catch (error) {
+    botState = "error";
+    return res.status(500).json({
+      success: false,
+      error: error.message || "No se pudo reiniciar el bot.",
+    });
+  } finally {
+    lifecycleActionInProgress = false;
+  }
+});
 
 app.post("/api/send-message", async (req, res) => {
   try {
@@ -319,7 +640,10 @@ app.post("/api/send-message", async (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000, "0.0.0.0", () =>
-  console.log("API corriendo..."),
+  console.log(`API corriendo... (WA Web: ${webVersionRemotePath})`),
 );
 
-client.initialize();
+startWhatsappClient().catch((error) => {
+  botState = "error";
+  console.error("❌ Error iniciando WhatsApp:", error.message);
+});
