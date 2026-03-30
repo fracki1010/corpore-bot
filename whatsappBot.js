@@ -94,6 +94,8 @@ const client = new Client({
 const historiales = {};
 const pausados = new Set();
 const esperandoNombre = {};
+const hechosConfirmadosPorChat = new Map();
+const inboundMessageBuffer = new Map();
 let lastQr = null;
 let lastQrAt = null;
 let botState = "starting";
@@ -103,6 +105,43 @@ let lastOutboundMessageAt = null;
 let lastKnownWaState = null;
 let lastKnownConnected = null;
 const processedMessageIds = new Set();
+const BOT_TIMEZONE =
+  process.env.BOT_TIMEZONE || "America/Argentina/Buenos_Aires";
+const TIEMPO_AGRUPACION_MS = Number(
+  process.env.MESSAGE_GROUP_WINDOW_MS ||
+    process.env.BOT_MESSAGE_GROUP_DELAY_MS ||
+    process.env.BOT_REPLY_DELAY_MS ||
+    12000,
+);
+const TIEMPO_AGRUPACION_SEGURO_MS =
+  Number.isFinite(TIEMPO_AGRUPACION_MS) && TIEMPO_AGRUPACION_MS > 0
+    ? TIEMPO_AGRUPACION_MS
+    : 12000;
+const INDEX_TO_WEEKDAY = [
+  "domingo",
+  "lunes",
+  "martes",
+  "miercoles",
+  "jueves",
+  "viernes",
+  "sabado",
+];
+const MONTH_TO_MM = {
+  enero: "01",
+  febrero: "02",
+  marzo: "03",
+  abril: "04",
+  abriel: "04",
+  mayo: "05",
+  junio: "06",
+  julio: "07",
+  agosto: "08",
+  septiembre: "09",
+  setiembre: "09",
+  octubre: "10",
+  noviembre: "11",
+  diciembre: "12",
+};
 
 const NUMEROS_ADMINS = [
   "140278446997512@lid",
@@ -111,6 +150,193 @@ const NUMEROS_ADMINS = [
 ];
 
 let isPaused = false; // Variable de control para el bloqueo
+
+function normalizeTxt(texto) {
+  return (texto || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function formatDate(dd, mm, yyyy) {
+  return `${String(dd).padStart(2, "0")}/${String(mm).padStart(2, "0")}/${yyyy}`;
+}
+
+function dayOfWeekIndex(dd, mm, yyyy) {
+  const date = new Date(Date.UTC(yyyy, mm - 1, dd, 12, 0, 0));
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: BOT_TIMEZONE,
+    weekday: "short",
+  })
+    .format(date)
+    .toLowerCase();
+  const map = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+  return map[weekday] ?? 0;
+}
+
+function getTodayInBotTimezone() {
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat("es-AR", {
+    timeZone: BOT_TIMEZONE,
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+  const parts = formatter.formatToParts(now);
+  const weekday =
+    (parts.find((p) => p.type === "weekday")?.value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") || "desconocido";
+  const day = Number(parts.find((p) => p.type === "day")?.value || "0");
+  const month = Number(parts.find((p) => p.type === "month")?.value || "0");
+  const year = Number(parts.find((p) => p.type === "year")?.value || "0");
+  return { weekday, day, month, year };
+}
+
+function getCurrentYearInBotTimezone() {
+  return getTodayInBotTimezone().year || new Date().getUTCFullYear();
+}
+
+function extraerFeriadosConfirmados(texto) {
+  const textoLower = normalizeTxt(texto);
+  if (!textoLower.includes("feriado")) return [];
+
+  const patrones = [
+    /(\d{1,2})\s*y\s*(\d{1,2})\s*de\s*([a-záéíóú]+)/g,
+    /(\d{1,2})\s*de\s*([a-záéíóú]+)/g,
+  ];
+  const encontrados = [];
+
+  for (const patron of patrones) {
+    let match;
+    while ((match = patron.exec(textoLower)) !== null) {
+      if (match.length === 4) {
+        const d1 = String(Number(match[1])).padStart(2, "0");
+        const d2 = String(Number(match[2])).padStart(2, "0");
+        const mm = MONTH_TO_MM[normalizeTxt(match[3] || "")];
+        if (mm) encontrados.push(`${d1}-${mm}`, `${d2}-${mm}`);
+      } else if (match.length === 3) {
+        const dd = String(Number(match[1])).padStart(2, "0");
+        const mm = MONTH_TO_MM[normalizeTxt(match[2] || "")];
+        if (mm) encontrados.push(`${dd}-${mm}`);
+      }
+    }
+  }
+
+  return [...new Set(encontrados)];
+}
+
+function registrarHechosUsuario(chatId, textoUsuario) {
+  const hechos = hechosConfirmadosPorChat.get(chatId) || { feriados: new Set() };
+  const feriados = extraerFeriadosConfirmados(textoUsuario);
+  for (const fecha of feriados) hechos.feriados.add(fecha);
+  hechosConfirmadosPorChat.set(chatId, hechos);
+}
+
+function construirContextoDinamico(chatId) {
+  const hechos = hechosConfirmadosPorChat.get(chatId);
+  const today = getTodayInBotTimezone();
+  const fechaActual = today.day
+    ? `${today.weekday} ${formatDate(today.day, today.month, today.year)}`
+    : "";
+  if ((!hechos || hechos.feriados.size === 0) && !fechaActual) return "";
+
+  const lines = [];
+  if (fechaActual) lines.push(`- Fecha actual (${BOT_TIMEZONE}): ${fechaActual}.`);
+
+  if (hechos && hechos.feriados.size > 0) {
+    const year = getCurrentYearInBotTimezone();
+    const feriados = [...hechos.feriados]
+      .sort()
+      .map((f) => {
+        const [dd, mm] = f.split("-").map(Number);
+        const dow = INDEX_TO_WEEKDAY[dayOfWeekIndex(dd, mm, year)];
+        return `${formatDate(dd, mm, year)} (${dow})`;
+      })
+      .join(", ");
+    lines.push(`- Feriados mencionados por el usuario: ${feriados}.`);
+  }
+
+  return [
+    "HECHOS CONFIRMADOS POR EL USUARIO (NO CONTRADECIR):",
+    ...lines,
+    "- Si el usuario corrige una fecha o feriado, se toma su correccion como valida.",
+    "- No inventes el dia de semana de una fecha si no estas 100% seguro.",
+  ].join("\n");
+}
+
+function detectarConsultaHorarioPorDiaSemana(texto) {
+  const text = normalizeTxt(texto);
+  const regex =
+    /(abre|abren|abierto|abierta|esta abierto|esta abierta|estamos abiertos|estamos abiertas).{0,24}?\b(lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b/;
+  const match = text.match(regex);
+  if (!match) return null;
+  return match[2];
+}
+
+function detectarContradiccionDiaFecha(texto) {
+  const text = normalizeTxt(texto);
+  const regex =
+    /\b(lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b.{0,10}?(\d{1,2})\s+de\s+([a-z]+)(?:\s+de\s+(\d{4}))?/;
+  const match = text.match(regex);
+  if (!match) return null;
+
+  const weekdayInformado = match[1];
+  const dd = Number(match[2]);
+  const mm = Number(MONTH_TO_MM[match[3]] || 0);
+  const yyyy = Number(match[4] || getCurrentYearInBotTimezone());
+  if (!dd || !mm || !yyyy) return null;
+
+  const weekdayReal = INDEX_TO_WEEKDAY[dayOfWeekIndex(dd, mm, yyyy)];
+  if (weekdayReal === weekdayInformado) return null;
+
+  return { weekdayInformado, weekdayReal, dd, mm, yyyy };
+}
+
+function resolverReglaDeterministica(chatId, mensajeUsuario) {
+  const text = normalizeTxt(mensajeUsuario);
+
+  if (
+    /(que dia es hoy|que fecha es hoy|hoy que dia es|hoy que fecha es|que dia es|que fecha es)/.test(
+      text,
+    )
+  ) {
+    const today = getTodayInBotTimezone();
+    if (today.day && today.month && today.year) {
+      return `Hoy es ${today.weekday} ${formatDate(today.day, today.month, today.year)} (${BOT_TIMEZONE}).`;
+    }
+  }
+
+  const contradiction = detectarContradiccionDiaFecha(mensajeUsuario);
+  if (contradiction) {
+    return `Ojo: ${formatDate(contradiction.dd, contradiction.mm, contradiction.yyyy)} cae ${contradiction.weekdayReal}, no ${contradiction.weekdayInformado}.`;
+  }
+
+  const weekdayConsultado = detectarConsultaHorarioPorDiaSemana(mensajeUsuario);
+  if (!weekdayConsultado) return null;
+
+  const hechos = hechosConfirmadosPorChat.get(chatId);
+  if (!hechos || hechos.feriados.size === 0) return null;
+
+  const year = getCurrentYearInBotTimezone();
+  const feriadosQueCaenEseDia = [...hechos.feriados]
+    .map((f) => {
+      const [dd, mm] = f.split("-").map(Number);
+      const dow = INDEX_TO_WEEKDAY[dayOfWeekIndex(dd, mm, year)];
+      return { dd, mm, dow };
+    })
+    .filter((f) => f.dow === weekdayConsultado);
+
+  if (feriadosQueCaenEseDia.length === 0) return null;
+
+  const fechas = feriadosQueCaenEseDia
+    .map((f) => formatDate(f.dd, f.mm, year))
+    .join(", ");
+
+  return `No, este ${weekdayConsultado} estamos cerrados por feriado (${fechas}). Abrimos de lunes a viernes excepto feriados.`;
+}
 
 async function refreshConnectionSnapshot(trigger) {
   let waState = null;
@@ -309,7 +535,7 @@ async function handleIncomingMessage(message, source = "message") {
     return;
   }
 
-  // --- PROCESAR MENSAJE ---
+  // --- PROCESAR MENSAJE (AGRUPADO POR TIEMPO) ---
   let mensajeUsuario = message.body;
   if (
     message.hasMedia &&
@@ -319,8 +545,101 @@ async function handleIncomingMessage(message, source = "message") {
     mensajeUsuario = await transcribirAudio(media);
   }
   if (!mensajeUsuario) return;
+  encolarMensajeEntrante(chatId, numeroClienteLimpio, mensajeUsuario, message);
+  } catch (error) {
+    console.error("❌ Error procesando mensaje entrante:", error?.message || error);
+  }
+}
 
-  // --- DETECTOR MANUAL ---
+function encolarMensajeEntrante(chatId, numeroClienteLimpio, mensajeUsuario, messageRef) {
+  const existente = inboundMessageBuffer.get(chatId) || {
+    numeroClienteLimpio,
+    messages: [],
+    timer: null,
+    processing: false,
+    lastMessageRef: null,
+  };
+
+  existente.numeroClienteLimpio = numeroClienteLimpio;
+  existente.messages.push(mensajeUsuario);
+  existente.lastMessageRef = messageRef;
+
+  if (existente.timer) clearTimeout(existente.timer);
+  existente.timer = setTimeout(
+    () => procesarBufferEntrante(chatId),
+    TIEMPO_AGRUPACION_SEGURO_MS,
+  );
+
+  inboundMessageBuffer.set(chatId, existente);
+}
+
+async function procesarBufferEntrante(chatId) {
+  const buffer = inboundMessageBuffer.get(chatId);
+  if (!buffer) return;
+
+  if (buffer.processing) {
+    buffer.timer = setTimeout(
+      () => procesarBufferEntrante(chatId),
+      TIEMPO_AGRUPACION_SEGURO_MS,
+    );
+    return;
+  }
+
+  if (buffer.messages.length === 0) {
+    inboundMessageBuffer.delete(chatId);
+    return;
+  }
+
+  const numeroClienteLimpio = buffer.numeroClienteLimpio;
+  const messageRef = buffer.lastMessageRef;
+  const mensajeUsuario = buffer.messages.join("\n");
+  buffer.messages = [];
+  buffer.timer = null;
+  buffer.processing = true;
+
+  try {
+    await procesarMensajeAgrupado(
+      chatId,
+      numeroClienteLimpio,
+      mensajeUsuario,
+      messageRef,
+    );
+  } finally {
+    buffer.processing = false;
+
+    if (buffer.messages.length > 0) {
+      buffer.timer = setTimeout(
+        () => procesarBufferEntrante(chatId),
+        TIEMPO_AGRUPACION_SEGURO_MS,
+      );
+      return;
+    }
+
+    inboundMessageBuffer.delete(chatId);
+  }
+}
+
+async function procesarMensajeAgrupado(
+  chatId,
+  numeroClienteLimpio,
+  mensajeUsuario,
+  messageRef,
+) {
+  if (pausados.has(numeroClienteLimpio)) return;
+
+  registrarHechosUsuario(chatId, mensajeUsuario);
+  const respuestaDeterministica = resolverReglaDeterministica(chatId, mensajeUsuario);
+
+  if (!historiales[chatId]) historiales[chatId] = [];
+  historiales[chatId].push({ role: "user", content: mensajeUsuario });
+
+  if (respuestaDeterministica) {
+    historiales[chatId].push({ role: "assistant", content: respuestaDeterministica });
+    await client.sendMessage(chatId, respuestaDeterministica, { sendSeen: false });
+    lastOutboundMessageAt = new Date().toISOString();
+    return;
+  }
+
   const frasesGatillo = [
     "hablar con humano",
     "asesor",
@@ -334,20 +653,19 @@ async function handleIncomingMessage(message, source = "message") {
       numeroClienteLimpio,
       mensajeUsuario,
       "manual",
-      message,
+      messageRef,
     );
     return;
   }
 
-  // --- IA GROQ ---
-  if (!historiales[chatId]) historiales[chatId] = [];
-  historiales[chatId].push({ role: "user", content: mensajeUsuario });
-
   try {
-    const chat = await message.getChat();
+    const chat = await messageRef.getChat();
     await chat.sendStateTyping();
 
-    let botResponse = await getChatResponse(historiales[chatId]);
+    const contextoDinamico = construirContextoDinamico(chatId);
+    let botResponse = await getChatResponse(historiales[chatId], {
+      dynamicContext: contextoDinamico,
+    });
 
     if (
       botResponse.includes("[TRANSFERIR_HUMANO]") ||
@@ -358,7 +676,7 @@ async function handleIncomingMessage(message, source = "message") {
         numeroClienteLimpio,
         "IA detectó cierre de venta",
         "cierre_venta",
-        message,
+        messageRef,
       );
       return;
     }
@@ -369,24 +687,18 @@ async function handleIncomingMessage(message, source = "message") {
         numeroClienteLimpio,
         "IA detectó consulta deuda/admin",
         "consulta_admin",
-        message,
+        messageRef,
       );
       return;
     }
 
     historiales[chatId].push({ role: "assistant", content: botResponse });
-
-    // CORREGIDO: Asegurar sendSeen false
     await client.sendMessage(chatId, botResponse, { sendSeen: false });
     lastOutboundMessageAt = new Date().toISOString();
-
     await chat.clearState();
   } catch (e) {
     console.log("Error IA o Envío");
     console.error(e.message);
-  }
-  } catch (error) {
-    console.error("❌ Error procesando mensaje entrante:", error?.message || error);
   }
 }
 

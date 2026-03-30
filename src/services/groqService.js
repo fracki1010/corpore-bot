@@ -5,7 +5,8 @@ const path = require("path");
 const { buildScheduleContextForAssistant } = require("./openingExceptionsService");
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const BUSINESS_TIMEZONE = "America/Argentina/Buenos_Aires";
+const BUSINESS_TIMEZONE =
+  process.env.BOT_TIMEZONE || "America/Argentina/Buenos_Aires";
 
 const WEEKDAY_INDEX = {
   domingo: 0,
@@ -189,8 +190,14 @@ function enrichRelativeDateHints(historialDeChat) {
   return enriched;
 }
 
-// Recibimos un ARRAY de mensajes (el historial), no solo un texto
-const getChatResponse = async (historialDeChat) => {
+function normalizeHistoryInput(input) {
+  if (Array.isArray(input)) return input;
+  if (typeof input === "string") return [{ role: "user", content: input }];
+  return [];
+}
+
+// Recibimos historial (array) o texto simple. Opcional: contexto dinámico.
+const getChatResponse = async (historialDeChat, options = {}) => {
   try {
     // 1. Leemos la info del negocio
     const infoPath = path.join(process.cwd(), 'business_info.txt');
@@ -208,11 +215,20 @@ const getChatResponse = async (historialDeChat) => {
         role: "system",
         content: `${contextoNegocio}\n\n${specialScheduleContext}`
     };
+    const dynamicSystemMessage = options.dynamicContext
+      ? {
+          role: "system",
+          content: options.dynamicContext,
+        }
+      : null;
 
     // 3. Unimos: Instrucciones + Historial de la charla
     // El historial ya viene con el formato [{role: 'user', content: '...'}, ...]
-    const enrichedHistory = enrichRelativeDateHints(historialDeChat);
-    const messagesToSend = [systemMessage, ...enrichedHistory];
+    const normalizedHistory = normalizeHistoryInput(historialDeChat);
+    const enrichedHistory = enrichRelativeDateHints(normalizedHistory);
+    const messagesToSend = dynamicSystemMessage
+      ? [systemMessage, dynamicSystemMessage, ...enrichedHistory]
+      : [systemMessage, ...enrichedHistory];
 
     // 4. Enviamos todo a Groq
     const chatCompletion = await groq.chat.completions.create({
