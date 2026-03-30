@@ -122,7 +122,7 @@ function detectRelativeDateHints(text) {
     const iso = resolveNextWeekdayIso(day);
     if (iso) {
       hints.push(
-        `"${nextDayMatch[0]}" corresponde a ${iso} (${BUSINESS_TIMEZONE}).`,
+        `"${nextDayMatch[0]}" corresponde a ${iso}.`,
       );
     }
   }
@@ -133,30 +133,30 @@ function detectRelativeDateHints(text) {
     const iso = resolveThisWeekdayIso(day);
     if (iso) {
       hints.push(
-        `"${thisDayMatch[0]}" corresponde a ${iso} (${BUSINESS_TIMEZONE}).`,
+        `"${thisDayMatch[0]}" corresponde a ${iso}.`,
       );
     }
   }
 
   if (/\bpasado\s+manana\b/i.test(normalized)) {
-    hints.push(`"pasado mañana" corresponde a ${resolveOffsetIso(2)} (${BUSINESS_TIMEZONE}).`);
+    hints.push(`"pasado mañana" corresponde a ${resolveOffsetIso(2)}.`);
   } else if (/\bmanana\b/i.test(normalized)) {
-    hints.push(`"mañana" corresponde a ${resolveOffsetIso(1)} (${BUSINESS_TIMEZONE}).`);
+    hints.push(`"mañana" corresponde a ${resolveOffsetIso(1)}.`);
   }
 
   if (/\bhoy\b/i.test(normalized)) {
-    hints.push(`"hoy" corresponde a ${resolveOffsetIso(0)} (${BUSINESS_TIMEZONE}).`);
+    hints.push(`"hoy" corresponde a ${resolveOffsetIso(0)}.`);
   }
 
   if (/\b(la\s+)?(proxima|pr[oó]xima)\s+semana\b/i.test(normalized) || /\bla\s+semana\s+que\s+viene\b/i.test(normalized)) {
     const range = getWeekRangeIso({ nextWeek: true });
     hints.push(
-      `"la semana que viene" corresponde al rango ${range.from} a ${range.to} (${BUSINESS_TIMEZONE}).`,
+      `"la semana que viene" corresponde al rango ${range.from} a ${range.to}.`,
     );
   } else if (/\besta\s+semana\b/i.test(normalized)) {
     const range = getWeekRangeIso({ nextWeek: false });
     hints.push(
-      `"esta semana" corresponde al rango ${range.from} a ${range.to} (${BUSINESS_TIMEZONE}).`,
+      `"esta semana" corresponde al rango ${range.from} a ${range.to}.`,
     );
   }
 

@@ -244,7 +244,7 @@ function construirContextoDinamico(chatId) {
   if ((!hechos || hechos.feriados.size === 0) && !fechaActual) return "";
 
   const lines = [];
-  if (fechaActual) lines.push(`- Fecha actual (${BOT_TIMEZONE}): ${fechaActual}.`);
+  if (fechaActual) lines.push(`- Fecha actual: ${fechaActual}.`);
 
   if (hechos && hechos.feriados.size > 0) {
     const year = getCurrentYearInBotTimezone();
@@ -305,7 +305,7 @@ function resolverReglaDeterministica(chatId, mensajeUsuario) {
   ) {
     const today = getTodayInBotTimezone();
     if (today.day && today.month && today.year) {
-      return `Hoy es ${today.weekday} ${formatDate(today.day, today.month, today.year)} (${BOT_TIMEZONE}).`;
+      return `Hoy es ${today.weekday} ${formatDate(today.day, today.month, today.year)}.`;
     }
   }
 
