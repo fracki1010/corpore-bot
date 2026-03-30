@@ -8,6 +8,7 @@ const { getChatResponse } = require("./src/services/groqService");
 const { transcribirAudio } = require("./src/services/transcriptionService");
 const { getNumberContact } = require("./src/helpers/getNumberContact");
 const { normalizeNumber } = require("./src/helpers/normalizedNumber");
+const { listExceptions } = require("./src/services/openingExceptionsService");
 const scheduleOverridesRoutes = require("./src/routes/scheduleOverridesRoutes");
 const { requireAdminApiKey } = require("./src/middlewares/adminApiKeyMiddleware");
 
@@ -126,6 +127,15 @@ const INDEX_TO_WEEKDAY = [
   "viernes",
   "sabado",
 ];
+const WEEKDAY_TO_INDEX = {
+  domingo: 0,
+  lunes: 1,
+  martes: 2,
+  miercoles: 3,
+  jueves: 4,
+  viernes: 5,
+  sabado: 6,
+};
 const MONTH_NAMES = {
   1: "enero",
   2: "febrero",
@@ -218,6 +228,42 @@ function getTodayInBotTimezone() {
 
 function getCurrentYearInBotTimezone() {
   return getTodayInBotTimezone().year || new Date().getUTCFullYear();
+}
+
+function getTodayIsoInBotTimezone() {
+  const today = getTodayInBotTimezone();
+  if (!today.day || !today.month || !today.year) return null;
+  return `${today.year}-${String(today.month).padStart(2, "0")}-${String(today.day).padStart(2, "0")}`;
+}
+
+function addDaysToIso(isoDate, days) {
+  const [yyyy, mm, dd] = isoDate.split("-").map(Number);
+  const date = new Date(Date.UTC(yyyy, mm - 1, dd));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function resolveUpcomingWeekdayIso(weekdayName) {
+  const normalized = normalizeTxt(weekdayName);
+  const target = WEEKDAY_TO_INDEX[normalized];
+  if (target === undefined) return null;
+
+  const todayIso = getTodayIsoInBotTimezone();
+  if (!todayIso) return null;
+
+  const today = getTodayInBotTimezone();
+  const current = WEEKDAY_TO_INDEX[today.weekday];
+  if (current === undefined) return null;
+
+  let delta = target - current;
+  if (delta < 0) delta += 7;
+  return addDaysToIso(todayIso, delta);
+}
+
+function parseIsoDate(iso) {
+  const [yyyy, mm, dd] = String(iso).split("-").map(Number);
+  if (!yyyy || !mm || !dd) return null;
+  return { yyyy, mm, dd };
 }
 
 function extraerFeriadosConfirmados(texto) {
@@ -349,6 +395,32 @@ function resolverReglaDeterministica(chatId, mensajeUsuario) {
 
   const weekdayConsultado = detectarConsultaHorarioPorDiaSemana(mensajeUsuario);
   if (!weekdayConsultado) return null;
+
+  const targetIso = resolveUpcomingWeekdayIso(weekdayConsultado);
+  if (targetIso) {
+    const parts = parseIsoDate(targetIso);
+    if (parts) {
+      const naturalDate = formatNaturalDate(parts.dd, parts.mm, parts.yyyy, {
+        includeYear: false,
+      });
+      const exception = listExceptions().find((item) => item.date === targetIso);
+
+      if (exception) {
+        if (exception.isOpen) {
+          return `Sí, este ${naturalDate} abrimos. Horarios: 07:00 a 12:00 y 14:00 a 22:45.`;
+        }
+        const reason = exception.reason ? ` por ${exception.reason}` : "";
+        return `No, este ${naturalDate} no abrimos${reason}.`;
+      }
+
+      const weekdayIdx = WEEKDAY_TO_INDEX[weekdayConsultado];
+      const isBaseOpenDay = weekdayIdx >= 1 && weekdayIdx <= 5;
+      if (isBaseOpenDay) {
+        return `Sí, este ${naturalDate} abrimos. Horarios: 07:00 a 12:00 y 14:00 a 22:45.`;
+      }
+      return `No, este ${naturalDate} no abrimos.`;
+    }
+  }
 
   const hechos = hechosConfirmadosPorChat.get(chatId);
   if (!hechos || hechos.feriados.size === 0) return null;
