@@ -266,6 +266,38 @@ function parseIsoDate(iso) {
   return { yyyy, mm, dd };
 }
 
+function formatNaturalFromIso(iso, { includeYear = false } = {}) {
+  const parts = parseIsoDate(iso);
+  if (!parts) return iso;
+  return formatNaturalDate(parts.dd, parts.mm, parts.yyyy, { includeYear });
+}
+
+function joinWithY(items) {
+  if (!Array.isArray(items) || items.length === 0) return "";
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} y ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`;
+}
+
+function buildOtherClosedDaysNotice(excludeIsoDate = null) {
+  const todayIso = getTodayIsoInBotTimezone();
+  if (!todayIso) return "";
+
+  const endIso = addDaysToIso(todayIso, 30);
+  const closedExceptions = listExceptions()
+    .filter((item) => item && item.isOpen === false)
+    .filter((item) => item.date >= todayIso && item.date <= endIso)
+    .filter((item) => !excludeIsoDate || item.date !== excludeIsoDate);
+
+  if (closedExceptions.length === 0) return "";
+
+  const labels = closedExceptions.map((item) =>
+    `el ${formatNaturalFromIso(item.date, { includeYear: false })}`,
+  );
+
+  return ` Además, no abrimos ${joinWithY(labels)}.`;
+}
+
 function extraerFeriadosConfirmados(texto) {
   const textoLower = normalizeTxt(texto);
   if (!textoLower.includes("feriado")) return [];
@@ -406,19 +438,21 @@ function resolverReglaDeterministica(chatId, mensajeUsuario) {
       const exception = listExceptions().find((item) => item.date === targetIso);
 
       if (exception) {
+        const extraNotice = buildOtherClosedDaysNotice(targetIso);
         if (exception.isOpen) {
-          return `Sí, este ${naturalDate} abrimos. Horarios: 07:00 a 12:00 y 14:00 a 22:45.`;
+          return `Sí, este ${naturalDate} abrimos. Horarios: 07:00 a 12:00 y 14:00 a 22:45.${extraNotice}`;
         }
         const reason = exception.reason ? ` por ${exception.reason}` : "";
-        return `No, este ${naturalDate} no abrimos${reason}.`;
+        return `No, este ${naturalDate} no abrimos${reason}.${extraNotice}`;
       }
 
       const weekdayIdx = WEEKDAY_TO_INDEX[weekdayConsultado];
       const isBaseOpenDay = weekdayIdx >= 1 && weekdayIdx <= 5;
+      const extraNotice = buildOtherClosedDaysNotice(targetIso);
       if (isBaseOpenDay) {
-        return `Sí, este ${naturalDate} abrimos. Horarios: 07:00 a 12:00 y 14:00 a 22:45.`;
+        return `Sí, este ${naturalDate} abrimos. Horarios: 07:00 a 12:00 y 14:00 a 22:45.${extraNotice}`;
       }
-      return `No, este ${naturalDate} no abrimos.`;
+      return `No, este ${naturalDate} no abrimos.${extraNotice}`;
     }
   }
 
