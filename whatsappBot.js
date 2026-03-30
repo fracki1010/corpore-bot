@@ -734,6 +734,15 @@ async function iniciarTransferencia(
 // --- SISTEMA DE COLA PARA EVITAR SPAM/BLOQUEOS ---
 const messageQueue = [];
 let isProcessingQueue = false;
+let lastQueuedNumberSent = null;
+const OUTBOUND_MESSAGE_INTERVAL_MS = Number(
+  process.env.OUTBOUND_MESSAGE_INTERVAL_MS || 5 * 60 * 1000,
+);
+const OUTBOUND_MESSAGE_INTERVAL_SAFE_MS =
+  Number.isFinite(OUTBOUND_MESSAGE_INTERVAL_MS) &&
+  OUTBOUND_MESSAGE_INTERVAL_MS >= 30 * 1000
+    ? OUTBOUND_MESSAGE_INTERVAL_MS
+    : 5 * 60 * 1000;
 
 async function processQueue() {
   if (isProcessingQueue || messageQueue.length === 0) return;
@@ -744,12 +753,21 @@ async function processQueue() {
   );
 
   while (messageQueue.length > 0) {
-    const { number, message, resolve, reject } = messageQueue[0];
+    let nextIndex = 0;
+    if (lastQueuedNumberSent) {
+      const alternativeIndex = messageQueue.findIndex(
+        (item) => item.number !== lastQueuedNumberSent,
+      );
+      if (alternativeIndex >= 0) nextIndex = alternativeIndex;
+    }
+
+    const { number, message, resolve, reject } = messageQueue[nextIndex];
 
     try {
       const finalId = number.replace(/\D/g, "") + "@c.us";
       await client.sendMessage(finalId, message, { sendSeen: false });
       lastOutboundMessageAt = new Date().toISOString();
+      lastQueuedNumberSent = number;
       console.log(
         `✅ Mensaje enviado a ${number}. Restantes: ${messageQueue.length - 1}`,
       );
@@ -762,15 +780,14 @@ async function processQueue() {
     }
 
     // Quitamos el mensaje procesado
-    messageQueue.shift();
+    messageQueue.splice(nextIndex, 1);
 
-    // Si quedan mensajes, esperamos entre 300  y 600 segundos (promedio 450s)
+    // Si quedan mensajes, esperamos intervalo fijo de seguridad.
     if (messageQueue.length > 0) {
-      const delay = Math.floor(Math.random() * (600000 - 300000 + 1)) + 300000;
       console.log(
-        `⏳ Esperando ${Math.round(delay / 1000)}s para el siguiente mensaje...`,
+        `⏳ Esperando ${Math.round(OUTBOUND_MESSAGE_INTERVAL_SAFE_MS / 1000)}s para el siguiente cliente...`,
       );
-      await new Promise((res) => setTimeout(res, delay));
+      await new Promise((res) => setTimeout(res, OUTBOUND_MESSAGE_INTERVAL_SAFE_MS));
     }
   }
 
@@ -943,7 +960,7 @@ app.post("/api/send-message", async (req, res) => {
       success: true,
       status: "Encolado",
       message:
-        "El mensaje se enviará respetando el intervalo de seguridad (40s).",
+        `El mensaje se enviará respetando el intervalo de seguridad (${Math.round(OUTBOUND_MESSAGE_INTERVAL_SAFE_MS / 1000)}s).`,
       queuePosition: messageQueue.length,
     });
   } catch (e) {
