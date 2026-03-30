@@ -126,6 +126,20 @@ const INDEX_TO_WEEKDAY = [
   "viernes",
   "sabado",
 ];
+const MONTH_NAMES = {
+  1: "enero",
+  2: "febrero",
+  3: "marzo",
+  4: "abril",
+  5: "mayo",
+  6: "junio",
+  7: "julio",
+  8: "agosto",
+  9: "septiembre",
+  10: "octubre",
+  11: "noviembre",
+  12: "diciembre",
+};
 const MONTH_TO_MM = {
   enero: "01",
   febrero: "02",
@@ -160,6 +174,13 @@ function normalizeTxt(texto) {
 
 function formatDate(dd, mm, yyyy) {
   return `${String(dd).padStart(2, "0")}/${String(mm).padStart(2, "0")}/${yyyy}`;
+}
+
+function formatNaturalDate(dd, mm, yyyy, { includeYear = false } = {}) {
+  const dow = INDEX_TO_WEEKDAY[dayOfWeekIndex(dd, mm, yyyy)] || "";
+  const monthName = MONTH_NAMES[Number(mm)] || String(mm);
+  const yearPart = includeYear ? ` de ${yyyy}` : "";
+  return `${dow} ${Number(dd)} de ${monthName}${yearPart}`.trim();
 }
 
 function dayOfWeekIndex(dd, mm, yyyy) {
@@ -269,11 +290,17 @@ function construirContextoDinamico(chatId) {
 
 function detectarConsultaHorarioPorDiaSemana(texto) {
   const text = normalizeTxt(texto);
-  const regex =
+  const regexVerbThenDay =
     /(abre|abren|abierto|abierta|esta abierto|esta abierta|estamos abiertos|estamos abiertas).{0,24}?\b(lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b/;
-  const match = text.match(regex);
-  if (!match) return null;
-  return match[2];
+  const match1 = text.match(regexVerbThenDay);
+  if (match1) return match1[2];
+
+  const regexDayThenVerb =
+    /\b(lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b.{0,24}?(abre|abren|abierto|abierta|esta abierto|esta abierta|estamos abiertos|estamos abiertas)\b/;
+  const match2 = text.match(regexDayThenVerb);
+  if (match2) return match2[1];
+
+  return null;
 }
 
 function detectarContradiccionDiaFecha(texto) {
@@ -305,13 +332,19 @@ function resolverReglaDeterministica(chatId, mensajeUsuario) {
   ) {
     const today = getTodayInBotTimezone();
     if (today.day && today.month && today.year) {
-      return `Hoy es ${today.weekday} ${formatDate(today.day, today.month, today.year)}.`;
+      return `Hoy es ${formatNaturalDate(today.day, today.month, today.year, { includeYear: true })}.`;
     }
   }
 
   const contradiction = detectarContradiccionDiaFecha(mensajeUsuario);
   if (contradiction) {
-    return `Ojo: ${formatDate(contradiction.dd, contradiction.mm, contradiction.yyyy)} cae ${contradiction.weekdayReal}, no ${contradiction.weekdayInformado}.`;
+    const natural = formatNaturalDate(
+      contradiction.dd,
+      contradiction.mm,
+      contradiction.yyyy,
+      { includeYear: false },
+    );
+    return `Ojo: es ${natural}, no ${contradiction.weekdayInformado}.`;
   }
 
   const weekdayConsultado = detectarConsultaHorarioPorDiaSemana(mensajeUsuario);
@@ -332,7 +365,7 @@ function resolverReglaDeterministica(chatId, mensajeUsuario) {
   if (feriadosQueCaenEseDia.length === 0) return null;
 
   const fechas = feriadosQueCaenEseDia
-    .map((f) => formatDate(f.dd, f.mm, year))
+    .map((f) => formatNaturalDate(f.dd, f.mm, year, { includeYear: false }))
     .join(", ");
 
   return `No, este ${weekdayConsultado} estamos cerrados por feriado (${fechas}). Abrimos de lunes a viernes excepto feriados.`;

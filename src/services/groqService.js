@@ -58,6 +58,23 @@ function toIsoDateUTC(date) {
   return date.toISOString().slice(0, 10);
 }
 
+function formatIsoToNaturalSpanish(iso, timeZone = BUSINESS_TIMEZONE) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  const date = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  const parts = new Intl.DateTimeFormat("es-AR", {
+    timeZone,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).formatToParts(date);
+  const weekday = (parts.find((p) => p.type === "weekday")?.value || "").toLowerCase();
+  const day = parts.find((p) => p.type === "day")?.value || String(d);
+  const month = (parts.find((p) => p.type === "month")?.value || "").toLowerCase();
+  return `${weekday} ${day} de ${month}`;
+}
+
 function resolveNextWeekdayIso(dayName, timeZone = BUSINESS_TIMEZONE) {
   const target = WEEKDAY_INDEX[dayName.toLowerCase()];
   if (target === undefined) return null;
@@ -122,7 +139,7 @@ function detectRelativeDateHints(text) {
     const iso = resolveNextWeekdayIso(day);
     if (iso) {
       hints.push(
-        `"${nextDayMatch[0]}" corresponde a ${iso}.`,
+        `"${nextDayMatch[0]}" corresponde a ${formatIsoToNaturalSpanish(iso)}.`,
       );
     }
   }
@@ -133,30 +150,36 @@ function detectRelativeDateHints(text) {
     const iso = resolveThisWeekdayIso(day);
     if (iso) {
       hints.push(
-        `"${thisDayMatch[0]}" corresponde a ${iso}.`,
+        `"${thisDayMatch[0]}" corresponde a ${formatIsoToNaturalSpanish(iso)}.`,
       );
     }
   }
 
   if (/\bpasado\s+manana\b/i.test(normalized)) {
-    hints.push(`"pasado mañana" corresponde a ${resolveOffsetIso(2)}.`);
+    hints.push(
+      `"pasado mañana" corresponde a ${formatIsoToNaturalSpanish(resolveOffsetIso(2))}.`,
+    );
   } else if (/\bmanana\b/i.test(normalized)) {
-    hints.push(`"mañana" corresponde a ${resolveOffsetIso(1)}.`);
+    hints.push(
+      `"mañana" corresponde a ${formatIsoToNaturalSpanish(resolveOffsetIso(1))}.`,
+    );
   }
 
   if (/\bhoy\b/i.test(normalized)) {
-    hints.push(`"hoy" corresponde a ${resolveOffsetIso(0)}.`);
+    hints.push(
+      `"hoy" corresponde a ${formatIsoToNaturalSpanish(resolveOffsetIso(0))}.`,
+    );
   }
 
   if (/\b(la\s+)?(proxima|pr[oó]xima)\s+semana\b/i.test(normalized) || /\bla\s+semana\s+que\s+viene\b/i.test(normalized)) {
     const range = getWeekRangeIso({ nextWeek: true });
     hints.push(
-      `"la semana que viene" corresponde al rango ${range.from} a ${range.to}.`,
+      `"la semana que viene" corresponde del ${formatIsoToNaturalSpanish(range.from)} al ${formatIsoToNaturalSpanish(range.to)}.`,
     );
   } else if (/\besta\s+semana\b/i.test(normalized)) {
     const range = getWeekRangeIso({ nextWeek: false });
     hints.push(
-      `"esta semana" corresponde al rango ${range.from} a ${range.to}.`,
+      `"esta semana" corresponde del ${formatIsoToNaturalSpanish(range.from)} al ${formatIsoToNaturalSpanish(range.to)}.`,
     );
   }
 
