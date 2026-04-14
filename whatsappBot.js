@@ -882,6 +882,8 @@ const OUTBOUND_MESSAGE_INTERVAL_SAFE_MS =
   OUTBOUND_MESSAGE_INTERVAL_MS >= 30 * 1000
     ? OUTBOUND_MESSAGE_INTERVAL_MS
     : 5 * 60 * 1000;
+const LEGACY_API_KEY = "TU_CLAVE_SECRETA_123";
+const BOT_API_KEY = process.env.BOT_PASSWORD || LEGACY_API_KEY;
 
 async function processQueue() {
   if (isProcessingQueue || messageQueue.length === 0) return;
@@ -932,6 +934,54 @@ async function processQueue() {
 
   isProcessingQueue = false;
   console.log("🏁 Cola vacía. Procesamiento finalizado.");
+}
+
+function isValidApiKey(apiKey) {
+  return apiKey && apiKey === BOT_API_KEY;
+}
+
+function enqueueOutboundMessage(number, message) {
+  messageQueue.push({ number, message });
+  processQueue();
+  return messageQueue.length;
+}
+
+function buildPaymentReceiptMessage({
+  customerName,
+  membershipName,
+  amount,
+  paymentDate,
+  startDate,
+  endDate,
+  paymentMethod,
+  invoiceUrl,
+}) {
+  const safeName = String(customerName || "cliente").trim();
+  const safeMembership = String(membershipName || "Membresía").trim();
+  const safeAmount = String(amount || "-").trim();
+  const safePaymentDate = String(paymentDate || "-").trim();
+  const safeStartDate = String(startDate || "-").trim();
+  const safeEndDate = String(endDate || "-").trim();
+  const safeMethod = String(paymentMethod || "No especificado").trim();
+  const safeInvoiceUrl = String(invoiceUrl || "").trim();
+
+  return [
+    `Hola ${safeName} 👋`,
+    "",
+    "Te compartimos el recibo PDF de tu último pago registrado en *Corpore Sano*.",
+    "",
+    `Plan: ${safeMembership}`,
+    `Monto: ${safeAmount}`,
+    `Fecha de pago: ${safePaymentDate}`,
+    `Período: ${safeStartDate} al ${safeEndDate}`,
+    `Método: ${safeMethod}`,
+    "",
+    `Descargar PDF: ${safeInvoiceUrl}`,
+    "",
+    "Gracias por entrenar con nosotros 💪",
+    "",
+    "*(Este es un mensaje automático, por favor no respondas)*",
+  ].join("\n");
 }
 
 // API
@@ -1081,7 +1131,7 @@ app.post("/api/admin/whatsapp/restart", requireAdminApiKey, async (_req, res) =>
 app.post("/api/send-message", async (req, res) => {
   try {
     const { number, message, apiKey } = req.body;
-    if (apiKey !== "TU_CLAVE_SECRETA_123") {
+    if (!isValidApiKey(apiKey)) {
       return res.status(403).json({ error: "Key error" });
     }
 
@@ -1089,21 +1139,67 @@ app.post("/api/send-message", async (req, res) => {
       return res.status(400).json({ error: "Faltan datos (number o message)" });
     }
 
-    // Encolar el mensaje
-    messageQueue.push({ number, message });
-
-    // Iniciar el procesador si no está corriendo
-    processQueue();
+    const queuePosition = enqueueOutboundMessage(number, message);
 
     res.json({
       success: true,
       status: "Encolado",
       message:
         `El mensaje se enviará respetando el intervalo de seguridad (${Math.round(OUTBOUND_MESSAGE_INTERVAL_SAFE_MS / 1000)}s).`,
-      queuePosition: messageQueue.length,
+      queuePosition,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/api/send-payment-receipt-link", async (req, res) => {
+  try {
+    const {
+      number,
+      apiKey,
+      customerName,
+      membershipName,
+      amount,
+      paymentDate,
+      startDate,
+      endDate,
+      paymentMethod,
+      invoiceUrl,
+    } = req.body || {};
+
+    if (!isValidApiKey(apiKey)) {
+      return res.status(403).json({ error: "Key error" });
+    }
+
+    if (!number || !invoiceUrl) {
+      return res.status(400).json({
+        error: "Faltan datos (number o invoiceUrl)",
+      });
+    }
+
+    const message = buildPaymentReceiptMessage({
+      customerName,
+      membershipName,
+      amount,
+      paymentDate,
+      startDate,
+      endDate,
+      paymentMethod,
+      invoiceUrl,
+    });
+
+    const queuePosition = enqueueOutboundMessage(number, message);
+
+    return res.json({
+      success: true,
+      status: "Encolado",
+      message:
+        `El recibo se enviará respetando el intervalo de seguridad (${Math.round(OUTBOUND_MESSAGE_INTERVAL_SAFE_MS / 1000)}s).`,
+      queuePosition,
+    });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
   }
 });
 
