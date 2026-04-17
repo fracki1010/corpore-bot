@@ -3,7 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
-const { Client, LocalAuth } = require("whatsapp-web.js");
+const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 const { getChatResponse } = require("./src/services/groqService");
 const { transcribirAudio } = require("./src/services/transcriptionService");
 const { getNumberContact } = require("./src/helpers/getNumberContact");
@@ -994,7 +994,7 @@ const corsConfig = {
 };
 
 app.use(cors(corsConfig));
-app.use(express.json());
+app.use(express.json({ limit: "25mb" }));
 app.use("/api/schedule-overrides", scheduleOverridesRoutes);
 
 async function getStatusPayload() {
@@ -1197,6 +1197,43 @@ app.post("/api/send-payment-receipt-link", async (req, res) => {
       message:
         `El recibo se enviará respetando el intervalo de seguridad (${Math.round(OUTBOUND_MESSAGE_INTERVAL_SAFE_MS / 1000)}s).`,
       queuePosition,
+    });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/api/send-document", async (req, res) => {
+  try {
+    const { number, apiKey, fileName, mimeType, fileBase64, caption } = req.body || {};
+
+    if (!isValidApiKey(apiKey)) {
+      return res.status(403).json({ error: "Key error" });
+    }
+
+    if (!number || !fileBase64) {
+      return res.status(400).json({
+        error: "Faltan datos (number o fileBase64)",
+      });
+    }
+
+    const finalId = number.replace(/\D/g, "") + "@c.us";
+    const media = new MessageMedia(
+      mimeType || "application/pdf",
+      String(fileBase64),
+      fileName || "recibo.pdf",
+    );
+
+    await client.sendMessage(finalId, media, {
+      caption: caption || "",
+      sendSeen: false,
+      sendMediaAsDocument: true,
+    });
+
+    return res.json({
+      success: true,
+      status: "Enviado",
+      message: "Documento enviado por WhatsApp.",
     });
   } catch (e) {
     return res.status(500).json({ error: e.message });
