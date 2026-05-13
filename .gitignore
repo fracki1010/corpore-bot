@@ -3,3 +3,6 @@ node_modules
 .DS_Store
 npm-debug.log
 .wwebjs_auth
+.wwebjs_cache
+clientes.json
+opening_exceptions.json
